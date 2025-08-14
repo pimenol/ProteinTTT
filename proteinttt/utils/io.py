@@ -14,7 +14,7 @@ def setup_logger(log_file_path=None, log_name='log', debug=False):
         debug (bool, optional): Whether to set the logger to debug level.
     """
     logger = logging.getLogger(log_name)
-    logger.setLevel(logging.WARNING if not debug else logging.DEBUG)
+    logger.setLevel(logging.INFO if not debug else logging.DEBUG)
     formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
 
     if logger.hasHandlers():
