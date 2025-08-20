@@ -33,7 +33,6 @@ def rename_and_renumber(predicted_structure, target_chain_id, target_numbers):
             raise ValueError("Predicted PDB must have exactly one chain.")
         chain = chains[0]
         chain.id = target_chain_id
-        print(chain)
         residues = [res for res in chain if res.id[0] == ' ']
         if len(residues) != len(target_numbers):
             raise ValueError("Residue count mismatch after sequence check.")
@@ -45,7 +44,8 @@ def rename_and_renumber(predicted_structure, target_chain_id, target_numbers):
                 ins_code = match.group(2) if match.group(2) else ' '
             else:
                 raise ValueError(f"Cannot parse residue numbering: {num}")
-            res.id = (res.id, res_num, ins_code)
+            # res.id = (res.id, res_num, ins_code)
+            res.id = (' ', res_num, ins_code)
             for atom in res:
                 atom.serial_number = atom_counter
                 atom_counter += 1
@@ -61,8 +61,6 @@ def fix_pdb(original_pdb, predicted_pdb, chain_id, output_pdb):
     # Get original chain data
     orig_structure = parser.get_structure("orig", original_pdb)
     orig_seq, orig_nums = extract_chain_data(orig_structure, chain_id)
-    # print(orig_nums)
-
     # Get predicted single chain data
     pred_structure = parser.get_structure("pred", predicted_pdb)
     pred_chains = list(pred_structure.get_chains())
