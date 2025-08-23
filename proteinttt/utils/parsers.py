@@ -5,13 +5,6 @@ import pandas as pd
 def fetch_and_parse_sequences(df: pd.DataFrame, pdb_dir):
     """
     Strict, case-sensitive PDB parser for sequences with Chothia numbering.
-    - Reads ATOM lines directly to preserve chain IDs exactly (so 's' != 'S').
-    - Uses only CA atoms to define residues; ignores altlocs except ' ' or 'A'.
-    - Preserves Chothia residue numbers, including insertion codes (e.g., 27A).
-    - For H/L chains, prefixes positions with 'H'/'L'; antigen chains are unprefixed.
-
-    Returns columns:
-      pdb, chain, chain_type, sequence, chothia_numbers, chothia_positions, resolution
     """
     output_rows = []
 
@@ -27,7 +20,6 @@ def fetch_and_parse_sequences(df: pd.DataFrame, pdb_dir):
         pdb_id = str(row["pdb"]).lower()
         pdb_path = pdb_dir / f"{pdb_id}.pdb"
 
-        # Build exact, case-sensitive chain-id -> type map from the dataframe
         chain_type_map = {}
         for col in ["Hchain", "Lchain", "antigen_chain"]:
             if col in row and pd.notna(row[col]):
@@ -41,24 +33,20 @@ def fetch_and_parse_sequences(df: pd.DataFrame, pdb_dir):
         except Exception as e:
             print(f"Error reading PDB {pdb_id}: {e}")
             continue
-
-        # Collect residues per chain from CA atoms only, in file order
-        # chains[chain_id] -> list of (resseq:int, icode:str, resname:str)
+        
         chains = {}
-        seen = {}  # seen[(chain_id, resseq, icode)] to avoid duplicates
+        seen = {}  
 
         for line in lines:
             if not line.startswith("ATOM"):
                 continue
-            # PDB fixed columns
             atom_name = line[12:16].strip()
             altloc = line[16]
             resname = line[17:20].strip()
-            chain_id = line[21]  # EXACT character, preserves case
+            chain_id = line[21] 
             resseq_str = line[22:26]
             icode = line[26]
 
-            # We only want canonical backbone residues, choose CA and altloc ' ' or 'A'
             if atom_name != "CA" or altloc not in (" ", "A"):
                 continue
 
@@ -74,10 +62,8 @@ def fetch_and_parse_sequences(df: pd.DataFrame, pdb_dir):
 
             chains.setdefault(chain_id, []).append((resseq, icode, resname))
 
-        # Build rows only for the chains explicitly requested in the DF, preserving case
         for chain_id, chain_type in chain_type_map.items():
             if chain_id not in chains:
-                # Chain is strictly missing (we do NOT fallback to case-insensitive)
                 print(f"Warning: Chain '{chain_id}' not found in PDB {pdb_id}.")
                 continue
 
