@@ -106,3 +106,24 @@ def lddt_score(pdb_ref, pdb_model, atom_type="CA", cutoff=15.0, thresholds=(0.5,
         per_res.append(score)
 
     return float(np.mean(per_res)) if per_res else float("nan")
+
+
+def calculate_plddt(pdb_file_path):
+    """Calculate mean pLDDT from a PDB file."""
+    plddt_scores = []
+
+    with open(pdb_file_path, 'r') as f:
+        for line in f:
+            if line.startswith('ATOM') and line[12:16].strip() == 'CA':
+                try:
+                    b_factor = float(line[60:66].strip())
+                    plddt_scores.append(b_factor)
+                except ValueError:
+                    print(f"Skipping line due to ValueError: {line.strip()}")
+                    continue
+
+    if plddt_scores:
+        mean_plddt = sum(plddt_scores) / len(plddt_scores)
+        return round(mean_plddt, 2)
+    else:
+        return None
