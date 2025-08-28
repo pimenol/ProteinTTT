@@ -100,3 +100,52 @@ def fetch_and_parse_sequences(df: pd.DataFrame, pdb_dir):
             })
 
     return pd.DataFrame(output_rows)
+
+
+def extract_cdr_to_new_pdb(input_pdb_path, output_pdb_path, chain, is_heavy):
+    if is_heavy == True:
+        CDR_RANGES = {
+            'H1': (26, 32),
+            'H2': (52, 56),
+            'H3': (95, 102),
+        }
+    elif is_heavy == False:
+        CDR_RANGES = {
+            'L1': (24, 34),
+            'L2': (50, 56),
+            'L3': (89, 97)
+        }
+    else:
+        raise ValueError(f"{input_pdb_path}: is_heavy: {is_heavy}. Chain is antigen.")
+
+    def is_in_cdr_region(residue_number: int):
+        """Check if residue is in CDR region."""
+        for start, end in CDR_RANGES.values():
+            if start <= residue_number <= end:
+                return True
+        return False
+
+    cdr_lines = []
+    with open(input_pdb_path, 'r') as f:
+        for line in f:
+            if (line.startswith('ATOM')) and line[21].strip() == chain:
+                # Parse residue number
+                residue_num_str = line[22:26].strip()
+                try:
+                    if residue_num_str[-1].isalpha():
+                        residue_num = int(residue_num_str[:-1])
+                    else:
+                        residue_num = int(residue_num_str)
+                except ValueError:
+                    print(f"Skipping line due to ValueError: {line.strip()}")
+                    continue
+
+                # Check if it's in CDR and is a CA atom (can be adjusted)
+                if is_in_cdr_region(residue_num) and line[12:16].strip() == 'CA':
+                    # print(line)
+                    cdr_lines.append(line)
+
+    # Write the collected lines to the output PDB
+    with open(output_pdb_path, 'w') as f:
+        for line in cdr_lines:
+            f.write(line)
