@@ -2,6 +2,7 @@ import subprocess
 import numpy as np
 from pathlib import Path
 import Bio.PDB as bp
+import biotite.structure.io as bsio
 
 
 def calculate_tm_score(
@@ -110,20 +111,6 @@ def lddt_score(pdb_ref, pdb_model, atom_type="CA", cutoff=15.0, thresholds=(0.5,
 
 def calculate_plddt(pdb_file_path):
     """Calculate mean pLDDT from a PDB file."""
-    plddt_scores = []
-
-    with open(pdb_file_path, 'r') as f:
-        for line in f:
-            if line.startswith('ATOM') and line[12:16].strip() == 'CA':
-                try:
-                    b_factor = float(line[60:66].strip())
-                    plddt_scores.append(b_factor)
-                except ValueError:
-                    print(f"Skipping line due to ValueError: {line.strip()}")
-                    continue
-
-    if plddt_scores:
-        mean_plddt = sum(plddt_scores) / len(plddt_scores)
-        return round(mean_plddt, 2)
-    else:
-        return None
+    struct = bsio.load_structure(pdb_file_path, extra_fields=["b_factor"])
+    pLDDT = float(np.asarray(struct.b_factor, dtype=float).mean())
+    return pLDDT
