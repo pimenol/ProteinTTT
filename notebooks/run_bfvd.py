@@ -1,0 +1,183 @@
+import sys
+from pathlib import Path
+import os
+import warnings
+import pandas as pd
+import numpy as np
+import time
+import esm
+import biotite.structure.io as bsio
+from proteinttt.models.esmfold import ESMFoldTTT, DEFAULT_ESMFOLD_TTT_CFG
+from proteinttt.utils.structure import calculate_tm_score, lddt_score
+import torch
+
+
+def main(start, end, date):
+    # --- Configuration ---
+    base_path = Path("/scratch/project/open-32-14/pimenol1/ProteinTTT/ProteinTTT/data/bfvd/bfvd_logan")
+    OUTPUT_PDB = base_path / 'predicted_structures'
+    SUMMARY_PATH = base_path / 'subset_1.tsv'
+    SAVE_PATH = base_path / f"results_{start}_{end}_{date}.tsv"
+    CORRECT_PREDICTED_PDB = Path("/scratch/project/open-32-14/antonb/bfvd/bfvd")
+    # --- Load Data ---
+    df = pd.read_csv(SUMMARY_PATH, sep="\t")
+
+    # --- Initialize Model ---
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    base_model = esm.pretrained.esmfold_v1().eval().to(device)
+    ttt_cfg = DEFAULT_ESMFOLD_TTT_CFG
+    ttt_cfg.steps = 20
+    ttt_cfg.seed = 0
+    model = ESMFoldTTT.ttt_from_pretrained(
+        base_model,
+        ttt_cfg=ttt_cfg,
+        esmfold_config=base_model.cfg
+    ).to(device)
+
+    def predict_structure(model, sequence, pdb_id, tag, out_dir=OUTPUT_PDB):
+        with torch.no_grad():
+            pdb_str = model.infer_pdb(sequence)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
+        out_path = out_dir / f"{pdb_id}{tag}.pdb"
+        out_path.write_text(pdb_str)
+
+        struct = bsio.load_structure(out_path, extra_fields=["b_factor"])
+        pLDDT = float(np.asarray(struct.b_factor, dtype=float).mean())
+        return pLDDT
+
+    def fold_chain(sequence, pdb_id, *, model, tag, out_dir=OUTPUT_PDB):
+        model.ttt(sequence)
+        pLDDT_after = predict_structure(model, sequence, pdb_id, tag='_ttt', out_dir=out_dir)
+        model.ttt_reset()
+        return pLDDT_after
+    
+    def calculate_metrics(true_path, pred_path):
+        true_struct = bsio.load_structure(true_path, extra_fields=["b_factor"])
+        plddt_alpha = float(np.asarray(true_struct.b_factor, dtype=float).mean())
+
+        tm_score = calculate_tm_score(pred_path, true_path)
+        lddt = lddt_score(true_path, pred_path)
+
+        return tm_score, lddt, plddt_alpha
+
+    # --- Main Processing Loop ---
+    start_time = time.time()
+    col = 'sequence'
+    len_col = 'lenghth'
+    processed_count = 0
+
+    for i, row in df.iterrows():
+        if not (start <= i < end):
+            continue
+
+        if row[len_col] > 400 or row[len_col] < 30 or pd.notna(row['pLDDT_before']):
+            continue
+
+        if pd.isna(row[col]):
+            continue
+        
+        start_seq_time = time.time()
+        processed_count += 1
+        seq_id = str(row.get("id"))
+        seq = str(row[col]).strip().upper()
+
+        pLDDT_before, pLDDT_after, tm_score_before, lddt_before, pldd_alphafold, tm_score_after, lddt_after = np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan
+
+# HANDLE ALREADY PROCESSED ------------------------------
+        if (OUTPUT_PDB / f"{id}.pdb").exists():
+            try:
+                tm_score_before, lddt_before, pldd_alphafold = calculate_metrics(
+                    true_path=CORRECT_PREDICTED_PDB / f"{id}.pdb",
+                    pred_path=OUTPUT_PDB / f"{id}.pdb"
+                )
+            except Exception as e:
+                warnings.warn(f"Error calculating metrics: {id}: {e}")
+
+            df.at[i, 'tm_score_before'] = tm_score_before
+            df.at[i, 'lddt_before'] = lddt_before
+            df.at[i, 'plddt_AlphaFold'] = pldd_alphafold
+            
+            if (OUTPUT_PDB / f"{id}_ttt.pdb").exists():
+                try:
+                    tm_score_after, lddt_after, _ = calculate_metrics(
+                        true_path=CORRECT_PREDICTED_PDB / f"{id}.pdb",
+                        pred_path=OUTPUT_PDB / f"{id}_ttt.pdb"
+                    )
+                except Exception as e:
+                    warnings.warn(f"{id}: {e}")
+                    
+                df.at[i, 'lddt_after'] = lddt_after
+                df.at[i, 'tm_score_after'] = tm_score_after
+            continue
+
+# BEFORE ------------------------------
+
+        try:
+            pLDDT_before = predict_structure(model, seq, seq_id, tag="")
+        except Exception as e:
+            warnings.warn(f"Error predicting structure for {seq_id}: {e}")
+
+        try:
+            tm_score_before, lddt_before, pldd_alphafold = calculate_metrics(
+            true_path=CORRECT_PREDICTED_PDB / f"{id}.pdb",
+            pred_path=OUTPUT_PDB / f"{id}.pdb"
+            )   
+        except Exception as e:
+            warnings.warn(f"Error calculating metrics: {id}: {e}")
+
+# AFTER ------------------------------
+
+        if pLDDT_before < 70:
+            try:
+                pLDDT_after = fold_chain(seq, seq_id, model=model, tag="")
+            except Exception as e:
+                warnings.warn(f"Error folding chain for {seq_id}: {e}")
+            
+            try:
+                tm_score_after, lddt_after, _ = calculate_metrics(
+                    true_path=CORRECT_PREDICTED_PDB / f"{id}.pdb",
+                    pred_path=OUTPUT_PDB / f"{id}_ttt.pdb"
+                )
+            except Exception as e:
+                warnings.warn(f"{id}: {e}")
+
+        df.at[i, 'pLDDT_after'] = pLDDT_after
+        df.at[i, 'pLDDT_before'] = pLDDT_before
+        
+        df.at[i, 'time'] = time.time() - start_seq_time
+        df.at[i, 'tm_score_before'] = tm_score_before
+        df.at[i, 'lddt_before'] = lddt_before
+
+        df.at[i, 'lddt_after'] = lddt_after
+        df.at[i, 'tm_score_after'] = tm_score_after
+
+        df.at[i, 'plddt_AlphaFold'] = pldd_alphafold
+
+        # print(f"Processed sequence {i} (ID: {seq_id}). pLDDT before: {pLDDT_before:.2f}, after: {pLDDT_after:.2f}")
+
+        if processed_count > 0 and processed_count % 50 == 0:
+            df.to_csv(path_or_buf=SAVE_PATH, sep="\t", index=False)
+            print(f"Saved progress. Total time elapsed: {time.time() - start_time:.2f} seconds for {processed_count} sequences.")
+
+    # --- Final Save ---
+    end_time = time.time()
+    print(f"Processing complete. Total time elapsed: {end_time - start_time:.2f} seconds for {processed_count} sequences.")
+    df.to_csv(SAVE_PATH, sep="\t", index=False)
+    print("Final results saved.")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("Usage: python your_script_name.py <start_index> <end_index>")
+        sys.exit(1)
+
+    try:
+        start_index = int(sys.argv[1])
+        end_index = int(sys.argv[2])
+        main(start_index, end_index, date=time.strftime("%Y%m%d"))
+    except ValueError:
+        print("Error: Start and end indices must be integers.")
+        sys.exit(1)
