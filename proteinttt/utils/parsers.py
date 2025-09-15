@@ -215,21 +215,21 @@ def extract_cdr_to_new_pdb(input_pdb_path, output_pdb_path, chain, is_heavy):
         for line in cdr_lines:
             f.write(line)
 
-def fetch_and_parse_sequences(df, pdb_dir):
+def fetch_and_parse_sequences(df, pdb_dir, id_column='pdb'):
     parser = PDBParser(QUIET=True)
     output_rows = []
 
     for _, row in df.iterrows():
-        pdb_id = row['pdb'].lower()
+        pdb_id = row[id_column]
         pdb_path = pdb_dir / f"{pdb_id}.pdb"
 
         chain_type_map = {}
         for col in ['Hchain', 'Lchain', 'antigen_chain']:
-            if pd.notna(row[col]):
+            if col in df.columns and pd.notna(row[col]):
                 chains = str(row[col]).replace(" ", "").split('|')
                 for ch in chains:
                     chain_type_map[ch] = col
-
+                    
         try:
             structure = parser.get_structure(pdb_id, pdb_path)
         except Exception as e:
@@ -240,10 +240,9 @@ def fetch_and_parse_sequences(df, pdb_dir):
 
         for chain in model:
             chain_id = chain.get_id()
-            if chain_id in chain_type_map:
+            if chain_id in chain_type_map or id_column != 'pdb':
                 seq = ""
                 for residue in chain:
-                    # if residue.has_id('CA'):
                     if residue.id[0] == ' ':
                         resname = residue.get_resname()
                         try:
@@ -253,11 +252,11 @@ def fetch_and_parse_sequences(df, pdb_dir):
                             continue
 
                 output_rows.append({
-                    "pdb": pdb_id,
+                    "id": pdb_id,
                     "chain": chain_id,
-                    "chain_type": chain_type_map[chain_id],
+                    "chain_type": chain_type_map[chain_id] if id_column == 'pdb' else None,
                     "sequence": seq,
-                    "resolution": row['resolution']
+                    "resolution": row['resolution'] if id_column == 'pdb' else None
                 })
 
     return pd.DataFrame(output_rows)
