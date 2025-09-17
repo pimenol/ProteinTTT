@@ -137,3 +137,9 @@ dmypy.json
 # VSCode
 *.vscode
 data/*
+all_structures/cdr_regions/*
+all_structures/cdr_h3_region/*
+all_structures/chothia/*
+all_structures/predicted_structures/*
+all_structures/corrected_predicted_structures/*
+all_structures/raw/*
