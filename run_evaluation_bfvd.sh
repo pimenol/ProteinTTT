@@ -4,6 +4,8 @@
 #SBATCH --partition=qgpu_free
 #SBATCH --nodes=1
 #SBATCH --gpus=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
 #SBATCH --time=18:00:00
 
 # Activate conda environment
