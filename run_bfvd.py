@@ -18,7 +18,7 @@ def main(start, end, date):
     base_path = Path("/scratch/project/open-32-14/pimenol1/ProteinTTT/ProteinTTT/data/bfvd/")
     OUTPUT_PDB = base_path / 'predicted_structures'
     SUMMARY_PATH = base_path / 'subset_1.tsv'
-    SAVE_PATH = base_path / f"results_{start}_{end}_{date}.tsv"
+    SAVE_PATH = base_path / f"results_1_{start}_{end}_{date}.tsv"
     CORRECT_PREDICTED_PDB = Path("/scratch/project/open-32-14/antonb/bfvd/bfvd")
     # --- Load Data ---
     df = pd.read_csv(SUMMARY_PATH, sep="\t")
