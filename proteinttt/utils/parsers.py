@@ -378,3 +378,122 @@ def download_structure_and_extract_chain(pdb_code: str, chain_id: str, output_di
         pass
 
     return output_path
+
+
+import requests
+
+def download_chain_cif_to_pdb(pdb_id, chain_id, output_file):
+    """
+    Downloads a specific chain from a PDB entry in CIF format and saves it as a PDB file.
+
+    Args:
+        pdb_id (str): The 4-character PDB ID (e.g., "1TND").
+        chain_id (str): The single-character chain ID to extract (e.g., "A").
+        output_file (str): The path to the output PDB file (e.g., "chainA.pdb").
+    """
+    # Construct the download URL for the CIF file
+    url = f"https://files.rcsb.org/download/{pdb_id}.cif"
+    
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+    except requests.exceptions.RequestException as e:
+        print(f"Error downloading CIF file for PDB ID {pdb_id}: {e}")
+        return
+
+    cif_lines = response.text.splitlines()
+
+    # Find the start of the atom_site data loop
+    in_atom_site_loop = False
+    headers = []
+    data_lines = []
+    
+    for line in cif_lines:
+        if line.startswith('_atom_site.'):
+            headers.append(line.strip())
+        elif line.strip() == 'loop_':
+            # A new loop starts, if we have headers, the next lines are data
+            if headers:
+                in_atom_site_loop = True
+        elif in_atom_site_loop:
+            if line.startswith('#') or not line.strip():
+                # End of the loop data
+                break
+            data_lines.append(line)
+
+    if not headers or not data_lines:
+        print("Could not find _atom_site data in the CIF file.")
+        return
+
+    # Map header names to their index
+    try:
+        header_map = {h.split('.')[1]: i for i, h in enumerate(headers)}
+        group_pdb_idx = header_map['group_PDB']
+        chain_idx = header_map['auth_asym_id'] # Use auth_asym_id for author-assigned chain
+        atom_idx = header_map['label_atom_id']
+        res_name_idx = header_map['label_comp_id']
+        res_seq_idx = header_map['auth_seq_id']
+        x_idx = header_map['Cartn_x']
+        y_idx = header_map['Cartn_y']
+        z_idx = header_map['Cartn_z']
+        occupancy_idx = header_map['occupancy']
+        bfactor_idx = header_map['B_iso_or_equiv']
+        element_idx = header_map['type_symbol']
+    except KeyError as e:
+        print(f"Missing expected CIF column: {e}")
+        return
+
+    # Process and filter atom lines
+    pdb_lines = []
+    atom_serial = 1
+    for line in data_lines:
+        # CIF fields can be quoted if they contain spaces
+        fields = []
+        in_quote = False
+        current_field = ''
+        for char in line:
+            if char == "'" or char == '"':
+                in_quote = not in_quote
+            elif char.isspace() and not in_quote:
+                if current_field:
+                    fields.append(current_field)
+                    current_field = ''
+            else:
+                current_field += char
+        if current_field:
+            fields.append(current_field)
+
+        if fields[chain_idx] == chain_id:
+            record_type = fields[group_pdb_idx]
+            atom_name = fields[atom_idx]
+            res_name = fields[res_name_idx]
+            res_seq = fields[res_seq_idx]
+            x, y, z = float(fields[x_idx]), float(fields[y_idx]), float(fields[z_idx])
+            occupancy = float(fields[occupancy_idx])
+            temp_factor = float(fields[bfactor_idx])
+            element = fields[element_idx]
+
+            # Format atom name to be 4 characters, left-aligned if short
+            if len(atom_name) < 4 and len(element) == 1:
+                formatted_atom_name = f" {atom_name:<3}"
+            else:
+                formatted_atom_name = f"{atom_name:^4}"
+
+            # Format to PDB ATOM record specification
+            pdb_line = (f"{record_type:<6}{atom_serial:>5} {formatted_atom_name:<4}{res_name:>3} "
+                        f"{chain_id:>1}{res_seq:>4}    {x:8.3f}{y:8.3f}{z:8.3f}"
+                        f"{occupancy:6.2f}{temp_factor:6.2f}          {element:>2}")
+            pdb_lines.append(pdb_line)
+            atom_serial += 1
+
+    # Write the collected PDB lines to the output file
+    try:
+        with open(output_file, 'w') as f:
+            f.write(f"HEADER    CHAIN {chain_id} FROM PDB ID {pdb_id.upper()}\n")
+            for line in pdb_lines:
+                f.write(line + '\n')
+            f.write("END\n")
+        print(f"Successfully saved chain {chain_id} from {pdb_id} to {output_file}")
+    except IOError as e:
+        print(f"Error writing to file {output_file}: {e}")
+
