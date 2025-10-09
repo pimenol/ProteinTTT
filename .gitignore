@@ -140,3 +140,4 @@ data/sabdab/*
 data/bfvd/correct_structure/*
 data/bfvd/fixed_pdb/*
 data/bfvd/predicted_structures/*
+jobs/*
