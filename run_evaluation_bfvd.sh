@@ -1,10 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=job
-#SBATCH --account=OPEN-32-14
+#SBATCH --account=OPEN-35-8
 #SBATCH --partition=qgpu_free
 #SBATCH --nodes=1
 #SBATCH --gpus=1
 #SBATCH --time=18:00:00
+#SBATCH --output=./jobs/bfvd_%j.out
 
 # Activate conda environment
 eval "$(conda shell.bash hook)"
