@@ -14,10 +14,10 @@ import argparse
 
 def main(start, end, date):
     # --- Configuration ---
-    base_path = Path("/scratch/project/open-32-14/pimenol1/ProteinTTT/ProteinTTT/data/bfvd/")
+    base_path = Path("/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/data/bfvd/")
     OUTPUT_PDB = base_path / 'predicted_structures'
     SUMMARY_PATH = base_path / 'to_process.tsv'
-    SAVE_PATH = base_path / f"results_70_{start}_{end}_{date}.tsv"
+    SAVE_PATH = base_path / f"results_after_{start}_{end}_{date}.tsv"
     CORRECT_PREDICTED_PDB = Path("/scratch/project/open-35-8/antonb/bfvd/bfvd")
     # --- Load Data ---
     df = pd.read_csv(SUMMARY_PATH, sep="\t")
@@ -68,6 +68,8 @@ def main(start, end, date):
     col = 'sequence'
     len_col = 'lenghth'
     processed_count = 0
+    
+    print(f"{SUMMARY_PATH}")
 
     for i, row in df.iterrows():
         if not (start <= i < end):
@@ -80,87 +82,78 @@ def main(start, end, date):
             continue
         
         start_seq_time = time.time()
-        processed_count += 1
         seq_id = str(row.get("id"))
         seq = str(row[col]).strip().upper()
 
-        pLDDT_before, pLDDT_after, tm_score_before, lddt_before, pldd_alphafold, tm_score_after, lddt_after = np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan
+        pLDDT_before, pLDDT_after, tm_score_before, lddt_before, pldd_alphafold, tm_score_after, lddt_after = df.loc[i, [
+            'pLDDT_before', 'pLDDT_after', 'tm_score_before', 'lddt_before', 'plddt_AlphaFold', 'tm_score_after', 'lddt_after']].values
 
-# HANDLE ALREADY PROCESSED ------------------------------
+# HANDLE ALREADY PROCESSED BEFORE ------------------------------
         # if (OUTPUT_PDB / f"{seq_id}.pdb").exists():
-            # try:
-            #     tm_score_before, lddt_before, pldd_alphafold = calculate_metrics(
-            #         true_path=CORRECT_PREDICTED_PDB / f"{seq_id}.pdb",
-            #         pred_path=OUTPUT_PDB / f"{seq_id}.pdb"
-            #     )
-            # except Exception as e:
-            #     warnings.warn(f"Error calculating metrics: {seq_id}: {e}")
+        #     try:
+        #         tm_score_before, lddt_before, pldd_alphafold = calculate_metrics(
+        #             true_path=CORRECT_PREDICTED_PDB / f"{seq_id}.pdb",
+        #             pred_path=OUTPUT_PDB / f"{seq_id}.pdb"
+        #         )
+        #     except Exception as e:
+        #         warnings.warn(f"Error calculating metrics in already processed: {seq_id}: {e}")
 
-            # df.at[i, 'tm_score_before'] = tm_score_before
-            # df.at[i, 'lddt_before'] = lddt_before
-            # df.at[i, 'plddt_AlphaFold'] = pldd_alphafold
+        #     pLDDT_before = float(np.asarray(bsio.load_structure(OUTPUT_PDB / f"{seq_id}.pdb", extra_fields=["b_factor"]).b_factor, dtype=float).mean())
             
-            # print(f"Processed sequence {i} (ID: {seq_id}). pLDDT before: {pLDDT_before:.2f}, after: {pLDDT_after:.2f}")
-            
+        # else:
+        #     # BEFORE ------------------------------
+        #     try:
+        #         pLDDT_before = predict_structure(model, seq, seq_id, tag="")
+        #     except Exception as e:
+        #         continue
+
+        #     try:
+        #         tm_score_before, lddt_before, pldd_alphafold = calculate_metrics(
+        #             true_path=CORRECT_PREDICTED_PDB / f"{seq_id}.pdb",
+        #             pred_path=OUTPUT_PDB / f"{seq_id}.pdb"
+        #         )
+        #     except Exception as e:
+        #         warnings.warn(f"Error calculating metrics: {seq_id}: {e}")
+
+        # df.at[i, 'pLDDT_before'] = pLDDT_before
+        # df.at[i, 'tm_score_before'] = tm_score_before
+        # df.at[i, 'lddt_before'] = lddt_before
+        # df.at[i, 'plddt_AlphaFold'] = pldd_alphafold
+
+# HANDLE ALREADY PROCESSED AFTER ------------------------------ 
         if (OUTPUT_PDB / f"{seq_id}_ttt.pdb").exists():
+            try:
+                tm_score_after, lddt_after, pldd_alphafold = calculate_metrics(
+                    true_path=CORRECT_PREDICTED_PDB / f"{seq_id}.pdb",
+                    pred_path=OUTPUT_PDB / f"{seq_id}_ttt.pdb"
+                )
+            except Exception as e:
+                warnings.warn(f"Existed seq after metrics error: {seq_id}: {e}")
+            
+            struct = bsio.load_structure(OUTPUT_PDB / f"{seq_id}_ttt.pdb", extra_fields=["b_factor"])
+            pLDDT_after = float(np.asarray(struct.b_factor, dtype=float).mean())
+        else: 
+            # AFTER ------------------------------
+            try:
+                pLDDT_after = fold_chain(seq, seq_id, model=model, tag="")
+            except Exception as e:
+                warnings.warn(f"Error folding chain, after, new {pLDDT_after}, {seq_id}: {e}")
+
             try:
                 tm_score_after, lddt_after, _ = calculate_metrics(
                     true_path=CORRECT_PREDICTED_PDB / f"{seq_id}.pdb",
                     pred_path=OUTPUT_PDB / f"{seq_id}_ttt.pdb"
                 )
             except Exception as e:
-                warnings.warn(f"{seq_id}: {e}")
-            
-            struct = bsio.load_structure(OUTPUT_PDB / f"{seq_id}_ttt.pdb", extra_fields=["b_factor"])
-            df.at[i, 'pLDDT_after'] = float(np.asarray(struct.b_factor, dtype=float).mean())
-            df.at[i, 'lddt_after'] = lddt_after
-            df.at[i, 'tm_score_after'] = tm_score_after
-            continue
-
-# BEFORE ------------------------------
-
-        # try:
-        #     pLDDT_before = predict_structure(model, seq, seq_id, tag="")
-        # except Exception as e:
-        #     continue
-
-        # try:
-        #     tm_score_before, lddt_before, pldd_alphafold = calculate_metrics(
-        #     true_path=CORRECT_PREDICTED_PDB / f"{seq_id}.pdb",
-        #     pred_path=OUTPUT_PDB / f"{seq_id}.pdb"
-        #     )   
-        # except Exception as e:
-        #     warnings.warn(f"Error calculating metrics: {seq_id}: {e}")
-
-# AFTER ------------------------------
-
-        # if pLDDT_before < 70:
-        try:
-            pLDDT_after = fold_chain(seq, seq_id, model=model, tag="")
-        except Exception as e:
-            warnings.warn(f"Error folding chain for {seq_id}: {e}")
-        
-        try:
-            tm_score_after, lddt_after, _ = calculate_metrics(
-                true_path=CORRECT_PREDICTED_PDB / f"{seq_id}.pdb",
-                pred_path=OUTPUT_PDB / f"{seq_id}_ttt.pdb"
-            )
-        except Exception as e:
-            warnings.warn(f"{seq_id}: {e}")
+                warnings.warn(f"Metrics for {seq_id}: {e}")
 
         df.at[i, 'pLDDT_after'] = pLDDT_after
-        # df.at[i, 'pLDDT_before'] = pLDDT_before
-        
-        df.at[i, 'time'] = time.time() - start_seq_time
-        # df.at[i, 'tm_score_before'] = tm_score_before
-        # df.at[i, 'lddt_before'] = lddt_before
-
         df.at[i, 'lddt_after'] = lddt_after
         df.at[i, 'tm_score_after'] = tm_score_after
-
-        df.at[i, 'plddt_AlphaFold'] = pldd_alphafold
-
-        print(f"Processed sequence {i} (ID: {seq_id}). pLDDT before: {row['pLDDT_before']:.2f}, after: {pLDDT_after:.2f}")
+        df.at[i, 'time'] = time.time() - start_seq_time
+        processed_count += 1
+        
+        print(f"Processed sequence {i} (ID: {seq_id}). pLDDT before: {pLDDT_before:.2f}, after: {pLDDT_after:.2f}")
 
         if processed_count > 0 and processed_count % 50 == 0:
             df.to_csv(path_or_buf=SAVE_PATH, sep="\t", index=False)
