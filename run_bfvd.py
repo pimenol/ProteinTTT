@@ -21,6 +21,7 @@ def main(start, end, date, calculate_only_ttt=False):
     base_path = Path("/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/data/bfvd/")
     OUT_DIR = base_path / 'predicted_structures'
     SUMMARY_PATH = base_path / 'subset_1.tsv' if not CALCULATE_ONLY_TTT else base_path / 'to_process.tsv'
+    LOGS_DIR = base_path / 'logs'
 
     CORRECT_PREDICTED_PDB = Path("/scratch/project/open-35-8/antonb/bfvd/bfvd")
     
@@ -28,8 +29,6 @@ def main(start, end, date, calculate_only_ttt=False):
     SAVE_PATH = base_path /f"results_ttt_{start}_{end}_{JOB_SUFFIX}.tsv"  if CALCULATE_ONLY_TTT else base_path / f"results_1_{start}_{end}_{JOB_SUFFIX}.tsv"
 
     print(f"SAVE_PATH: {SAVE_PATH}")
-    # OUT_DIR = Path(OUT_DIR / JOB_SUFFIX)
-    # OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # --- Load Data ---
     df = pd.read_csv(SUMMARY_PATH, sep="\t")
@@ -61,7 +60,9 @@ def main(start, end, date, calculate_only_ttt=False):
         return pLDDT
 
     def fold_chain(sequence, pdb_id, *, model, tag, out_dir=OUT_DIR):
-        model.ttt(sequence)
+        df = model.ttt(sequence)
+        pd.DataFrame([df]).to_csv(LOGS_DIR / f"{pdb_id}_log.tsv", sep="\t", index=False)
+        
         pLDDT_after = predict_structure(model, sequence, pdb_id, tag='_ttt', out_dir=out_dir)
         model.ttt_reset()
         return pLDDT_after
@@ -87,8 +88,8 @@ def main(start, end, date, calculate_only_ttt=False):
         if not (start <= i < end):
             continue
 
-        if row[len_col] > 400 or row[len_col] < 30:
-            continue
+        # if row[len_col] > 400 or row[len_col] < 30:
+        #     continue
 
         if pd.isna(row[col]):
             continue
