@@ -15,18 +15,18 @@ import uuid
 import traceback
 
 
-def main(start, end, date, calculate_only_ttt=False):
+def main(start, end, date, path_to_df, calculate_only_ttt=False):
     # --- Configuration ---
     CALCULATE_ONLY_TTT = calculate_only_ttt
     base_path = Path("/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/data/bfvd/")
     OUT_DIR = base_path / 'predicted_structures'
-    SUMMARY_PATH = base_path / 'subset_1.tsv' if not CALCULATE_ONLY_TTT else base_path / 'to_process.tsv'
+    SUMMARY_PATH = path_to_df
     LOGS_DIR = base_path / 'logs'
 
     CORRECT_PREDICTED_PDB = Path("/scratch/project/open-35-8/antonb/bfvd/bfvd")
     
     JOB_SUFFIX = os.getenv("SLURM_JOB_ID", str(uuid.uuid4()))
-    SAVE_PATH = base_path /f"results_ttt_{start}_{end}_{JOB_SUFFIX}.tsv"  if CALCULATE_ONLY_TTT else base_path / f"results_1_{start}_{end}_{JOB_SUFFIX}.tsv"
+    SAVE_PATH = base_path /f"results_ttt_{start}_{end}_{JOB_SUFFIX}.tsv"  if CALCULATE_ONLY_TTT else base_path / 'results' / f"results_{start}_{end}_{JOB_SUFFIX}.tsv"
 
     print(f"SAVE_PATH: {SAVE_PATH}")
 
@@ -60,11 +60,11 @@ def main(start, end, date, calculate_only_ttt=False):
         return pLDDT
 
     def fold_chain(sequence, pdb_id, *, model, tag, out_dir=OUT_DIR):
+        model.ttt_reset()
         df = model.ttt(sequence)
         pd.DataFrame([df]).to_csv(LOGS_DIR / f"{pdb_id}_log.tsv", sep="\t", index=False)
         
         pLDDT_after = predict_structure(model, sequence, pdb_id, tag='_ttt', out_dir=out_dir)
-        model.ttt_reset()
         return pLDDT_after
     
     def calculate_metrics(true_path, pred_path):
@@ -79,7 +79,7 @@ def main(start, end, date, calculate_only_ttt=False):
     # --- Main Processing Loop ---
     start_time = time.time()
     col = 'sequence'
-    len_col = 'lenghth'
+    len_col = 'length'
     processed_count = 0
     
     print(f"{SUMMARY_PATH}")
@@ -100,10 +100,10 @@ def main(start, end, date, calculate_only_ttt=False):
         processed_count += 1
         
         pLDDT_before, pLDDT_after, tm_score_before, lddt_before, pldd_alphafold, tm_score_after, lddt_after = df.loc[i, [
-            'pLDDT_before', 'pLDDT_after', 'tm_score_before', 'lddt_before', 'plddt_AlphaFold', 'tm_score_after', 'lddt_after']].values
+            'pLDDT_before', 'pLDDT_after', 'tm_score_before', 'lddt_before', 'pLDDT_AlphaFold', 'tm_score_after', 'lddt_after']].values
 
         if not CALCULATE_ONLY_TTT:
-    # HANDLE ALREADY PROCESSED BEFORE ------------------------------
+# HANDLE ALREADY PROCESSED BEFORE ------------------------------
             if (OUT_DIR / f"{seq_id}.pdb").exists():
                 try:
                     tm_score_before, lddt_before, pldd_alphafold = calculate_metrics(
@@ -117,7 +117,7 @@ def main(start, end, date, calculate_only_ttt=False):
                 pLDDT_before = float(np.asarray(bsio.load_structure(OUT_DIR / f"{seq_id}.pdb", extra_fields=["b_factor"]).b_factor, dtype=float).mean())
                 
             else:
-                # BEFORE ------------------------------
+# BEFORE ------------------------------
                 try:
                     pLDDT_before = predict_structure(model, seq, seq_id, tag="")
                 except Exception as e:
@@ -136,7 +136,7 @@ def main(start, end, date, calculate_only_ttt=False):
             df.at[i, 'pLDDT_before'] = pLDDT_before
             df.at[i, 'tm_score_before'] = tm_score_before
             df.at[i, 'lddt_before'] = lddt_before
-            df.at[i, 'plddt_AlphaFold'] = pldd_alphafold
+            df.at[i, 'pLDDT_AlphaFold'] = pldd_alphafold
 
 # HANDLE ALREADY PROCESSED AFTER ------------------------------ 
         if (OUT_DIR / f"{seq_id}_ttt.pdb").exists():
@@ -152,11 +152,11 @@ def main(start, end, date, calculate_only_ttt=False):
             struct = bsio.load_structure(OUT_DIR / f"{seq_id}_ttt.pdb", extra_fields=["b_factor"])
             pLDDT_after = float(np.asarray(struct.b_factor, dtype=float).mean())
         else: 
-            # AFTER ------------------------------
+# AFTER ------------------------------
             try:
                 pLDDT_after = fold_chain(seq, seq_id, model=model, tag="")
             except Exception as e:
-                warnings.warn(f"Error folding chain, after, new {pLDDT_after}, {seq_id}: {e}")
+                warnings.warn(f"Error folding chain {pLDDT_after}, {seq_id}: {e}")
                 traceback.print_exc()
 
             try:
@@ -193,6 +193,7 @@ if __name__ == "__main__":
     parser.add_argument('--chunk_start', type=int, required=True, help='Starting index of the sequence chunk.')
     parser.add_argument('--chunk_end', type=int, required=True, help='Ending index of the sequence chunk.')
     parser.add_argument('--calculate_only_ttt', type=int, default=0, help='If 1, only calculate TTT without initial ESMFold prediction.')
+    parser.add_argument('--path_to_df', type=str, required=True, help='Path to the TSV file containing sequences to process.')
 
     args = parser.parse_args()
 
@@ -200,4 +201,4 @@ if __name__ == "__main__":
         print("Error: --chunk_start must be less than --chunk_end.")
         sys.exit(1)
 
-    main(args.chunk_start, args.chunk_end, date=time.strftime("%Y%m%d"), calculate_only_ttt=args.calculate_only_ttt==1)
+    main(args.chunk_start, args.chunk_end, date=time.strftime("%Y%m%d"), path_to_df=args.path_to_df, calculate_only_ttt=args.calculate_only_ttt == 1)
