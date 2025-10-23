@@ -62,7 +62,7 @@ def main(start, end, date, path_to_df, calculate_only_ttt=False):
     def fold_chain(sequence, pdb_id, *, model, tag, out_dir=OUT_DIR):
         model.ttt_reset()
         df = model.ttt(sequence)
-        pd.DataFrame([df]).to_csv(LOGS_DIR / f"{pdb_id}_log.tsv", sep="\t", index=False)
+        pd.DataFrame(df).to_csv(LOGS_DIR / f"{pdb_id}_log.tsv", sep="\t", index=False)
         
         pLDDT_after = predict_structure(model, sequence, pdb_id, tag='_ttt', out_dir=out_dir)
         return pLDDT_after
@@ -79,7 +79,6 @@ def main(start, end, date, path_to_df, calculate_only_ttt=False):
     # --- Main Processing Loop ---
     start_time = time.time()
     col = 'sequence'
-    len_col = 'length'
     processed_count = 0
     
     print(f"{SUMMARY_PATH}")
@@ -87,9 +86,6 @@ def main(start, end, date, path_to_df, calculate_only_ttt=False):
     for i, row in df.iterrows():
         if not (start <= i < end):
             continue
-
-        # if row[len_col] > 400 or row[len_col] < 30:
-        #     continue
 
         if pd.isna(row[col]):
             continue
@@ -119,6 +115,7 @@ def main(start, end, date, path_to_df, calculate_only_ttt=False):
             else:
 # BEFORE ------------------------------
                 try:
+                    model.ttt_reset()
                     pLDDT_before = predict_structure(model, seq, seq_id, tag="")
                 except Exception as e:
                     warnings.warn(f"Error calculating metrics: {seq_id}: {e}")
