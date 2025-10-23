@@ -136,8 +136,16 @@ dmypy.json
 
 # VSCode
 *.vscode
+
+# data
 data/sabdab/*
 data/bfvd/correct_structure/*
 data/bfvd/fixed_pdb/*
 data/bfvd/predicted_structures/*
 jobs/*
+data/bfvd/critical_seq/*
+data/bfvd/predicted_structures_with_bug/*
+data/bfvd/logs/*
+data/bfvd/logs_df/*
+data/bfvd/esm_fold/*
+data/bfvd/results/*
