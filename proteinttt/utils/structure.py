@@ -6,21 +6,53 @@ import biotite.structure.io as bsio
 
 
 def calculate_tm_score(
-    pred_path, pdb_path, chain_id=None, use_tmalign=False, verbose=False,
-    tmscore_path="/scratch/project/open-32-14/pimenol1/ProteinTTT/ProteinTTT/TMalign",
-    tmalign_path="/scratch/project/open-32-14/pimenol1/ProteinTTT/ProteinTTT/TMalign.cpp"
+    pred_path,
+    pdb_path,
+    chain_id=None,
+    use_tmalign=False,
+    verbose=False,
+    tmscore_path=None,
+    tmalign_path=None,
 ):
+    """Calculate TM-score between predicted and reference protein structures.
 
+    Uses either TMscore or TMalign executable to compute the TM-score, which measures
+    the global structural similarity between two protein structures.
+
+    Args:
+        pred_path: Path to predicted structure PDB file
+        pdb_path: Path to reference structure PDB file
+        chain_id: Chain ID to use (not implemented)
+        use_tmalign: Whether to use TMalign instead of TMscore executable
+        verbose: Whether to print command and output details
+        tmscore_path: Path to TMscore executable
+        tmalign_path: Path to TMalign executable
+
+    Returns:
+        float: TM-score value between 0 and 1, where 1 indicates perfect structural match
+
+    Raises:
+        NotImplementedError: If chain_id is provided
+        ValueError: If executable paths are not provided or TM-score not found in output
+    """
     if chain_id is not None:
-        raise NotImplementedError("Chain ID is not implemented for TM-score calculation.")
+        raise NotImplementedError(
+            "Chain ID is not implemented for TM-score calculation."
+        )
+
+    if tmscore_path is None or tmalign_path is None:
+        raise ValueError(
+            "Paths to TMscore and TMalign executables must be provided."
+        )
 
     # Run TMscore and capture the output
-    command = [tmalign_path, pdb_path, pred_path] if use_tmalign else [tmscore_path, pred_path, pdb_path]
+    command = (
+        [tmalign_path, pdb_path, pred_path]
+        if use_tmalign
+        else [tmscore_path, pred_path, pdb_path]
+    )
     result = subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
 
     def print_cmd():
@@ -34,36 +66,40 @@ def calculate_tm_score(
         print_cmd()
 
     # Extract TM-score from the output
-    for line in result.stdout.split('\n'):
+    for line in result.stdout.split("\n"):
         if line.startswith("TM-score"):
-            tm_score = float(line.split('=')[1].split()[0])
+            tm_score = float(line.split("=")[1].split()[0])
             return tm_score
 
     print_cmd()
     raise ValueError("TM-score not found in the output")
 
 
-def lddt_score(pdb_ref, pdb_model, atom_type="CA", cutoff=15.0, thresholds=(0.5, 1.0, 2.0, 4.0)):
-    """
-    Compute CA/CB-based lDDT between two protein structures.
-    
-    Parameters
-    ----------
-    pdb_ref : str
-        Path to reference/native PDB file
-    pdb_model : str
-        Path to model/predicted PDB file
-    atom_type : str
-        'CA' (default) or 'CB' (GLY falls back to CA)
-    cutoff : float
-        Neighbor distance cutoff in Å (default 15.0)
-    thresholds : tuple of float
-        lDDT thresholds in Å (default (0.5, 1.0, 2.0, 4.0))
-    
-    Returns
-    -------
-    float
-        Global lDDT score
+def lddt_score(
+    pdb_ref,
+    pdb_model,
+    atom_type="CA",
+    cutoff=15.0,
+    thresholds=(0.5, 1.0, 2.0, 4.0),
+):
+    """Compute local distance difference test (lDDT) score between two protein structures.
+
+    The lDDT score measures local distance differences between equivalent atoms in two
+    structures, considering both the reference and model structure neighborhoods.
+
+    Args:
+        pdb_ref: Path to reference/native PDB file
+        pdb_model: Path to model/predicted PDB file
+        atom_type: Atom type to use for distance calculations ('CA' or 'CB', default 'CA')
+        cutoff: Neighbor distance cutoff in Å (default 15.0)
+        thresholds: Distance difference thresholds in Å for lDDT calculation
+                   (default (0.5, 1.0, 2.0, 4.0))
+
+    Returns:
+        float: Global lDDT score between 0 and 1, where 1 indicates perfect local agreement
+
+    Raises:
+        ValueError: If no overlapping residues found between structures
     """
 
     def get_coords(pdb_path):
@@ -110,7 +146,17 @@ def lddt_score(pdb_ref, pdb_model, atom_type="CA", cutoff=15.0, thresholds=(0.5,
 
 
 def calculate_plddt(pdb_file_path):
-    """Calculate mean pLDDT from a PDB file."""
+    """Calculate mean predicted local distance difference test (pLDDT) from a PDB file.
+
+    pLDDT scores are stored in the B-factor column of PDB files and indicate the
+    confidence in local structure prediction, with higher values being better.
+
+    Args:
+        pdb_file_path: Path to PDB file containing pLDDT scores in B-factor column
+
+    Returns:
+        float: Mean pLDDT score across all residues
+    """
     struct = bsio.load_structure(pdb_file_path, extra_fields=["b_factor"])
     pLDDT = float(np.asarray(struct.b_factor, dtype=float).mean())
     return pLDDT
