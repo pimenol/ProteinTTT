@@ -61,7 +61,7 @@ def main(lr, ags):
 
     def fold_chain(sequence, pdb_id, *, model, out_dir=OUT_DIR):
         model.ttt_reset()
-        df = model.ttt(sequence)
+        df = model.ttt(sequence, msa_pth=MSA_PATH / f"{pdb_id}.a3m", return_logs=True)
         pd.DataFrame(df).to_csv(LOGS_DIR / f"{pdb_id}_log.tsv", sep="\t", index=False)
 
         pLDDT_after = predict_structure(model, sequence, pdb_id, tag='_ttt', out_dir=out_dir)
