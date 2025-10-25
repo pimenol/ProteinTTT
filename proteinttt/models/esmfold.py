@@ -70,20 +70,15 @@ class ESMFoldTTT(TTTModule, ESMFold):
 
         # Predict structure
         with torch.no_grad():
-            pdb_str = self.infer_pdb(seq, masking_pattern=None)
+            output = self.infer(seq)
+            pdb_str = self.output_to_pdb(output)[0]
+            plddt = output["mean_plddt"][0].item()
 
-        # Calculate pLDDT
-        # TODO Optimize by not saving to disk
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.pdb') as tmp:
-            tmp.write(pdb_str)
-            tmp.flush()
-            struct = bsio.load_structure(tmp.name, extra_fields=["b_factor"])
-            plddt = struct.b_factor.mean()
 
         # Store predictions
+        #TODO - config
         eval_step_preds = {'pdb': pdb_str}
         eval_step_metric_dict = {'plddt': plddt}
         confidence = plddt
 
         return eval_step_preds, eval_step_metric_dict, confidence
-    

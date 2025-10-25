@@ -5,6 +5,7 @@ import esm
 from esm.model.msa_transformer import MSATransformer
 
 from proteinttt.base import TTTModule, TTTConfig
+import biotite.sequence.io.fasta as fasta
 
 
 DEFAULT_MSA_TRANSFORMER_TTT_CFG = TTTConfig(
@@ -25,18 +26,25 @@ class MSATransformerTTT(TTTModule, MSATransformer):
         self.ttt_batch_converter = self.ttt_alphabet.get_batch_converter()
 
     def _ttt_tokenize(self, seq: str, **kwargs) -> torch.Tensor:
-        # Check that MSA is provided
-        # TODO Extend to have option to read MSA from file
-        assert "msa" in kwargs, "MSA must be provided"
-        msa = kwargs["msa"]
-        assert isinstance(msa, torch.Tensor), "MSA must be a tensor"
-        assert msa.ndim == 3, "MSA must be a 3D tensor with shape [bs, msa_len, seq_len]"
-        assert msa.shape[0] == 1, "Only one MSA should be provided"
+        if "msa_pth" in kwargs and kwargs["msa_pth"] is not None:
+            msa_pth = kwargs["msa_pth"]
+            fasta_file = fasta.FastaFile.read(str(msa_pth))
+            msa_seqs = list(fasta.get_sequences(fasta_file).values())
+            msa_data = [(f"seq_{i}", str(seq)) for i, seq in enumerate(msa_seqs)]
+            _, _, msa = self.ttt_batch_converter(msa_data)
 
-        # Check that first sequence in MSA is the same seq as the target sequence
+        elif "msa" in kwargs:
+            # Use provided MSA tensor
+            msa = kwargs["msa"]
+            assert isinstance(msa, torch.Tensor), "MSA must be a tensor"
+            assert msa.ndim == 3, "MSA must be a 3D tensor with shape [bs, msa_len, seq_len]"
+            assert msa.shape[0] == 1, "Only one MSA should be provided"
+        else:
+            raise ValueError("Either 'msa' tensor or 'msa_pth' file path must be provided")
+
         _, _, seq_tokens = self.ttt_batch_converter([('seq', seq)])
         assert torch.all(seq_tokens[0, :] == msa[0, 0, :]), "First sequence in MSA must be the same as the input sequence"
-        
+
         return msa  # [1, msa_len, seq_len]
 
     def _ttt_get_frozen_modules(self) -> list[torch.nn.Module]:
@@ -46,7 +54,7 @@ class MSATransformerTTT(TTTModule, MSATransformer):
             self.emb_layer_norm_before,
             self.emb_layer_norm_after
         ]
-    
+        
     def _ttt_mask_token(self, token: int) -> int:
         return self.ttt_alphabet.mask_idx
     
