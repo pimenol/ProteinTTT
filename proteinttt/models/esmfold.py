@@ -75,8 +75,8 @@ class ESMFoldTTT(TTTModule, ESMFold):
         with torch.no_grad():
             output = self.infer(seq, masking_pattern=None)
         
-        pdb_str = output["pdb_str"][0]
-        plddt = output["plddt"][0].mean().item()
+        pdb_str = self.output_to_pdb(output)
+        plddt = output["mean_plddt"].item()
 
         # Store predictions
         eval_step_preds = {"pdb": pdb_str}
