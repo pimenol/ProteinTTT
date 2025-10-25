@@ -62,7 +62,21 @@ def main(lr, ags):
     def fold_chain(sequence, pdb_id, *, model, out_dir=OUT_DIR):
         model.ttt_reset()
         df = model.ttt(sequence, msa_pth=MSA_PATH / f"{pdb_id}.a3m", return_logs=True)
-        pd.DataFrame(df).to_csv(LOGS_DIR / f"{pdb_id}_log.tsv", sep="\t", index=False)
+        
+        df_logs = df['df'].copy()
+        step_data = df['ttt_step_data']
+        pdb_strings_map = {}
+        for step, data_for_step in step_data.items():
+            pdb_strings_map[step] = data_for_step['eval_step_preds']['pdb']
+            
+        df_logs['pdb'] = df_logs['step'].map(pdb_strings_map)
+        
+        desired_columns = ['step', 'accumulated_step', 'loss', 'eval_step_time', 'plddt', 'pdb']
+        existing_columns = [col for col in desired_columns if col in df_logs.columns]
+        df_formatted = df_logs[existing_columns]
+        df_formatted.to_csv(Path(LOGS_DIR / f"{pdb_id}_log.tsv"), sep='\t', index=False)
+
+        # df['df']['plddt'].iloc[-1]
 
         pLDDT_after = predict_structure(model, sequence, pdb_id, tag='_ttt', out_dir=out_dir)
         return pLDDT_after
