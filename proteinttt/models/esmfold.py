@@ -73,12 +73,13 @@ class ESMFoldTTT(TTTModule, ESMFold):
     ) -> tuple[dict, dict, T.Optional[float]]:
         # Predict structure
         with torch.no_grad():
-            original_chunk_size = self.trunk.chunk_size
-            try:
-                self.set_chunk_size(32)
-                output = self.infer(seq, masking_pattern=None)
-            finally:
-                self.set_chunk_size(original_chunk_size)
+            output = self.infer(seq, masking_pattern=None)
+            # original_chunk_size = self.trunk.chunk_size
+            # try:
+            #     self.set_chunk_size(512)
+            #     output = self.infer(seq, masking_pattern=None)
+            # finally:
+            #     self.set_chunk_size(original_chunk_size)
         
         pdb_str = self.output_to_pdb(output)
         plddt = output["mean_plddt"].item()
