@@ -289,15 +289,15 @@ class TTTModule(torch.nn.Module, ABC):
 
             # Read MSA by replacing all insertions with padding tokens, then tokenize each sequence, and stack them
             msa = []
-            for seq in read_msa(
+            for seq_msa in read_msa(
                 msa_pth,
                 replace_inserstions=self._ttt_token_to_str(
                     self._ttt_get_padding_token()
                 ),
             ):
-                msa.append(self._ttt_tokenize(seq, **kwargs).squeeze(0))
+                msa.append(self._ttt_tokenize(seq_msa, **kwargs).squeeze(0))
             msa = torch.stack(msa)  # [msa_len, seq_len]
-
+            
             # Check the MSA contains the target sequence as the first sequence
             assert torch.all(
                 x[0, :] == msa[0, :]
@@ -307,7 +307,7 @@ class TTTModule(torch.nn.Module, ABC):
             # - except for MSA soft labels where MSA is only used for loss calculation
             if not self.ttt_cfg.loss_kind == "msa_soft_labels":
                 x = msa
-
+                        
         # Get trainable parameters and optimizer
         parameters = self._ttt_get_parameters()
         optimizer = self._ttt_get_optimizer(parameters)
@@ -323,7 +323,7 @@ class TTTModule(torch.nn.Module, ABC):
         if self.ttt_cfg.automatic_best_state_reset:
             best_confidence = 0
             best_state = None
-
+        
         # Run TTT loop
         # x = x.to(next(self.parameters()).device)
         loss = None
@@ -379,6 +379,7 @@ class TTTModule(torch.nn.Module, ABC):
                         msa_pth=msa_pth,
                         **kwargs,
                     )
+                    print(eval_step_metric_dict)
                     eval_step_time = time.time() - eval_step_start_time
 
                     # Update best state and confidence
