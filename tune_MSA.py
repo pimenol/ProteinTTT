@@ -18,13 +18,16 @@ import traceback
 def main(lr, ags):
     
     base_path = Path("/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/data/bfvd/")
-    OUT_DIR = base_path / 'predicted_structures_msa_{lr}_{ags}'
+    OUT_DIR = base_path / f'predicted_structures_msa_{lr}_{ags}'
     SUMMARY_PATH = base_path / 'proteinttt_msa_testset.tsv'
     LOGS_DIR = base_path / 'logs_msa'
     CORRECT_PREDICTED_PDB = Path("/scratch/project/open-35-8/antonb/bfvd/bfvd")
     MSA_PATH = Path("/scratch/project/open-35-8/antonb/bfvd/bfvd_msa")
     JOB_SUFFIX = os.getenv("SLURM_JOB_ID", str(uuid.uuid4()))
     SAVE_PATH = base_path / f"results_{JOB_SUFFIX}.tsv"
+    
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
     
     df = pd.read_csv(SUMMARY_PATH, sep="\t")
 
@@ -45,6 +48,8 @@ def main(lr, ags):
         ttt_cfg=ttt_cfg,
         esmfold_config=base_model.cfg
     ).to(device)
+    
+    model.set_chunk_size(256)
 
     def predict_structure(model, sequence, pdb_id, tag, out_dir=OUT_DIR):
         with torch.no_grad():
@@ -59,27 +64,32 @@ def main(lr, ags):
         pLDDT = float(np.asarray(struct.b_factor, dtype=float).mean())
         return pLDDT
 
+    def save_log(df, pdb_id):
+        df_logs = df['df'].copy()
+        step_data = df['ttt_step_data']
+
+        pdb_strings_map = {}
+        for step, data_for_step in step_data.items():
+            pdb_strings_map[step] = data_for_step['eval_step_preds']['pdb'][0]
+
+        df_logs['pdb'] = df_logs['step'].map(pdb_strings_map)
+
+        desired_columns = ['step', 'accumulated_step', 'loss', 'score_seq_time', 'eval_step_time', 'plddt', 'pdb']
+        existing_columns = [col for col in desired_columns if col in df_logs.columns]
+        df_combined_logs = df_logs[existing_columns]
+        df_combined_logs.to_csv(Path(LOGS_DIR / f"{pdb_id}_log.tsv"), sep='\t', index=False)
+        
+        pLDDT_before = df_combined_logs['plddt'].iloc[0]
+        
+        return pLDDT_before, pLDDT_after
+
     def fold_chain(sequence, pdb_id, *, model, out_dir=OUT_DIR):
         model.ttt_reset()
         df = model.ttt(sequence, msa_pth=MSA_PATH / f"{pdb_id}.a3m", return_logs=True)
-        
-        df_logs = df['df'].copy()
-        step_data = df['ttt_step_data']
-        pdb_strings_map = {}
-        for step, data_for_step in step_data.items():
-            pdb_strings_map[step] = data_for_step['eval_step_preds']['pdb']
-            
-        df_logs['pdb'] = df_logs['step'].map(pdb_strings_map)
-        
-        desired_columns = ['step', 'accumulated_step', 'loss', 'eval_step_time', 'plddt', 'pdb']
-        existing_columns = [col for col in desired_columns if col in df_logs.columns]
-        df_formatted = df_logs[existing_columns]
-        df_formatted.to_csv(Path(LOGS_DIR / f"{pdb_id}_log.tsv"), sep='\t', index=False)
-
-        # df['df']['plddt'].iloc[-1]
+        pLDDT_before = save_log(df, pdb_id)
 
         pLDDT_after = predict_structure(model, sequence, pdb_id, tag='_ttt', out_dir=out_dir)
-        return pLDDT_after
+        return pLDDT_before, pLDDT_after
 
     def calculate_metrics(true_path, pred_path):
         tm_score = calculate_tm_score(pred_path, true_path)
@@ -93,7 +103,7 @@ def main(lr, ags):
 
     print(f"{SUMMARY_PATH}")
 
-    columns_to_add = ['pLDDT_{lr}_{ags}', 'lddt_{lr}_{ags}', 'tm_score_{lr}_{ags}']
+    columns_to_add = [f'pLDDT_{lr}_{ags}', f'lddt_{lr}_{ags}', f'tm_score_{lr}_{ags}']
     for col_name in columns_to_add:
         if col_name not in df.columns:
             df[col_name] = np.nan
@@ -103,10 +113,10 @@ def main(lr, ags):
         seq = str(row[col]).strip().upper()
         processed_count += 1
 
-        pLDDT_before, pLDDT_after, tm_score_before, lddt_before, pldd_alphafold, tm_score_after, lddt_after = None, None, None, None, None, None, None
+        pLDDT_before, pLDDT_after, tm_score_after, lddt_after = None, None, None, None
         
         try:
-            pLDDT_after = fold_chain(seq, seq_id, model=model)
+            pLDDT_before, pLDDT_after = fold_chain(seq, seq_id, model=model)
         except Exception as e:
             warnings.warn(f"Error folding chain {pLDDT_after}, {seq_id}: {e}")
             traceback.print_exc()
@@ -124,7 +134,7 @@ def main(lr, ags):
         df.at[i, columns_to_add[1]] = lddt_after
         df.at[i, columns_to_add[2]] = tm_score_after
 
-        print(f"Processed sequence {i} (ID: {seq_id}). pLDDT before: {pLDDT_before:.2f}, after: {pLDDT_after:.2f}")
+        print(f"Processed sequence {i} (ID: {seq_id}). pLDDT before df: {df.at[i, 'pLDDT_before']:.2f}, predicted: {pLDDT_before}, after: {pLDDT_after:.2f}")
         
     df.to_csv(SAVE_PATH, sep="\t", index=False)
     print("Final results saved.")
