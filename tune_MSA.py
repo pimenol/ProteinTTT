@@ -16,40 +16,39 @@ import traceback
 
 
 def main(lr, ags):
-    
+
     base_path = Path("/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/data/bfvd/")
     OUT_DIR = base_path / f'predicted_structures_msa_{lr}_{ags}'
     SUMMARY_PATH = base_path / 'proteinttt_msa_testset.tsv'
-    LOGS_DIR = base_path / 'logs_msa'
+    LOGS_DIR = base_path / f'logs_msa_{lr}_{ags}'
     CORRECT_PREDICTED_PDB = Path("/scratch/project/open-35-8/antonb/bfvd/bfvd")
     MSA_PATH = Path("/scratch/project/open-35-8/antonb/bfvd/bfvd_msa")
     JOB_SUFFIX = os.getenv("SLURM_JOB_ID", str(uuid.uuid4()))
     SAVE_PATH = base_path / f"results_{JOB_SUFFIX}.tsv"
-    
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     df = pd.read_csv(SUMMARY_PATH, sep="\t")
 
     # --- Initialize Model ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     base_model = esm.pretrained.esmfold_v1().eval().to(device)
+    base_model.set_chunk_size(128)
     ttt_cfg = DEFAULT_ESMFOLD_TTT_CFG
-    
+
     ttt_cfg.steps = 20
     ttt_cfg.seed = 0
     ttt_cfg.lr = lr
     ttt_cfg.ags = ags
     ttt_cfg.msa = True
-    
+
     # ttt_cfg.loss_kind == "msa_soft_labels"
     model = ESMFoldTTT.ttt_from_pretrained(
         base_model,
         ttt_cfg=ttt_cfg,
         esmfold_config=base_model.cfg
     ).to(device)
-    
-    model.set_chunk_size(256)
 
     def predict_structure(model, sequence, pdb_id, tag, out_dir=OUT_DIR):
         with torch.no_grad():
@@ -78,9 +77,9 @@ def main(lr, ags):
         existing_columns = [col for col in desired_columns if col in df_logs.columns]
         df_combined_logs = df_logs[existing_columns]
         df_combined_logs.to_csv(Path(LOGS_DIR / f"{pdb_id}_log.tsv"), sep='\t', index=False)
-        
+
         pLDDT_before = df_combined_logs['plddt'].iloc[0]
-        
+
         return pLDDT_before, pLDDT_after
 
     def fold_chain(sequence, pdb_id, *, model, out_dir=OUT_DIR):
@@ -107,14 +106,14 @@ def main(lr, ags):
     for col_name in columns_to_add:
         if col_name not in df.columns:
             df[col_name] = np.nan
-            
+
     for i, row in df.iterrows():
         seq_id = str(row.get("id"))
         seq = str(row[col]).strip().upper()
         processed_count += 1
 
-        pLDDT_before, pLDDT_after, tm_score_after, lddt_after = None, None, None, None
-        
+        pLDDT_after, tm_score_after, lddt_after = None, None, None
+
         try:
             pLDDT_before, pLDDT_after = fold_chain(seq, seq_id, model=model)
         except Exception as e:
@@ -135,7 +134,7 @@ def main(lr, ags):
         df.at[i, columns_to_add[2]] = tm_score_after
 
         print(f"Processed sequence {i} (ID: {seq_id}). pLDDT before df: {df.at[i, 'pLDDT_before']:.2f}, predicted: {pLDDT_before}, after: {pLDDT_after:.2f}")
-        
+
     df.to_csv(SAVE_PATH, sep="\t", index=False)
     print("Final results saved.")
 

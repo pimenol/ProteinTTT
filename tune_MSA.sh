@@ -4,13 +4,13 @@
 #SBATCH --partition=qgpu
 #SBATCH --nodes=1
 #SBATCH --gpus=1
-#SBATCH --time=2:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=./jobs/msa_%A_%a.out
 #SBATCH --error=./jobs/msa_%A_%a.err
 
 # Activate conda environment
 
-source "/scratch/project/open-32-14/pimenol1/miniconda3/etc/profile.d/conda.sh"
+source "/scratch/project/open-35-8/pimenol1/miniconda3/etc/profile.d/conda.sh"
 conda activate proteinttt
 
 cd /scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT || exit 1
