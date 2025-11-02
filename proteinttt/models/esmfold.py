@@ -1,11 +1,14 @@
 import typing as T
 from pathlib import Path
+import tempfile
 
 import torch
 import esm
 from esm.esmfold.v1.esmfold import ESMFold
 
 from proteinttt.base import TTTModule, TTTConfig
+from proteinttt.utils.structure import calculate_tm_score, lddt_score
+
 
 
 DEFAULT_ESMFOLD_TTT_CFG = TTTConfig(
@@ -69,6 +72,7 @@ class ESMFoldTTT(TTTModule, ESMFold):
         all_log_probs: torch.Tensor,
         seq: str,
         msa_pth: Path,
+        correct_pdb_path: T.Optional[Path] = None,
         **kwargs,
     ) -> tuple[dict, dict, T.Optional[float]]:
         # Predict structure
@@ -84,9 +88,23 @@ class ESMFoldTTT(TTTModule, ESMFold):
         pdb_str = self.output_to_pdb(output)
         plddt = output["mean_plddt"].item()
 
+        # Create temporary files for predicted and true PDBs
+        # pred_path is derived from the predicted PDB string
+        # true_path is derived from msa_pth which is a Path object, likely to a PDB file or similar
+        
+        # Save the predicted PDB string to a temporary file
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pdb') as tmp_file:
+            pred_path = Path(tmp_file.name)
+            pdb_str_to_write = pdb_str[0] if isinstance(pdb_str, list) else pdb_str
+            tmp_file.write(pdb_str_to_write)
+
+        tm_score = calculate_tm_score(pred_path, correct_pdb_path)
+        lddt = lddt_score(correct_pdb_path, pred_path)
+
         # Store predictions
         eval_step_preds = {"pdb": pdb_str}
-        eval_step_metric_dict = {"plddt": plddt}
+        eval_step_metric_dict = {"plddt": plddt, "tm_score": tm_score, "lddt": lddt}
         confidence = plddt
 
+        pred_path.unlink() # Moved deletion to here
         return eval_step_preds, eval_step_metric_dict, confidence
