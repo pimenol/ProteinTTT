@@ -260,6 +260,7 @@ class TTTModule(torch.nn.Module, ABC):
         self,
         seq: T.Optional[str] = None,
         msa_pth: T.Optional[Path] = None,
+        correct_pdb_path: T.Optional[Path] = None,
         **kwargs,
     ) -> dict[str, T.Any]:
         """Run test-time training loop to customize model to input protein.
@@ -377,9 +378,9 @@ class TTTModule(torch.nn.Module, ABC):
                         all_log_probs=all_log_probs,
                         seq=seq,
                         msa_pth=msa_pth,
+                        correct_pdb_path=correct_pdb_path,
                         **kwargs,
                     )
-                    print(eval_step_metric_dict)
                     eval_step_time = time.time() - eval_step_start_time
 
                     # Update best state and confidence
@@ -467,9 +468,31 @@ class TTTModule(torch.nn.Module, ABC):
 
             # Backward pass
             loss.backward()
+            # if (step + 1) % self.ttt_cfg.ags == 0:
+            #     optimizer.step()
+            #     optimizer.zero_grad()
+            
+            # Check for NaN/Inf gradients to prevent numerical instability
             if (step + 1) % self.ttt_cfg.ags == 0:
-                optimizer.step()
-                optimizer.zero_grad()
+                # Get trainable parameters with gradients
+                trainable_params = [p for p in self.parameters() if p.requires_grad and p.grad is not None]
+                
+                # Check for NaN/Inf gradients - skip update if found (this prevents crashes)
+                has_nan_grad = False
+                for param in trainable_params:
+                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                        has_nan_grad = True
+                        break
+                
+                if has_nan_grad:
+                    # Skip this update and zero gradients to prevent model corruption
+                    optimizer.zero_grad()
+                    import warnings
+                    warnings.warn(f"NaN/Inf gradient detected at step {step}, skipping update")
+                else:
+                    # Normal optimizer step - no to preserve TTT training dynamics
+                    optimizer.step()
+                    optimizer.zero_grad()
             self.eval()
 
         # Reset to best state to have the most confident model after TTT
