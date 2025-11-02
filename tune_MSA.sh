@@ -4,7 +4,7 @@
 #SBATCH --partition=qgpu
 #SBATCH --nodes=1
 #SBATCH --gpus=1
-#SBATCH --time=24:00:00
+#SBATCH --time=5:00:00
 #SBATCH --output=./jobs/msa_%A_%a.out
 #SBATCH --error=./jobs/msa_%A_%a.err
 
