@@ -13,6 +13,7 @@ import argparse
 import os
 import uuid
 import traceback
+from proteinttt.utils.plots import plot_mean_scores_vs_step
 
 
 def check_model_weights(model):
@@ -50,6 +51,7 @@ def main(lr, ags, grad_clip_max_norm):
     OUT_DIR = OUTPUTS_PATH /'predicted_structures'
     LOGS_DIR = OUTPUTS_PATH / 'logs' 
     SAVE_PATH = OUTPUTS_PATH / "results.tsv"
+    PLOT_PATH = OUTPUTS_PATH / 'plots'
 
     SUMMARY_PATH = base_path / 'proteinttt_msa_testset.tsv'
     CORRECT_PREDICTED_PDB = Path("/scratch/project/open-35-8/antonb/bfvd/bfvd")
@@ -58,6 +60,7 @@ def main(lr, ags, grad_clip_max_norm):
     OUTPUTS_PATH.mkdir(parents=True, exist_ok=True)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    PLOT_PATH.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(SUMMARY_PATH, sep="\t")
 
@@ -215,6 +218,9 @@ def main(lr, ags, grad_clip_max_norm):
         
         print(f"Processed sequence {i} (ID: {seq_id}). pLDDT before df: {plddt_df_before_str}, predicted: {plddt_before_str}, after: {plddt_after_str}")
 
+    plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"plddt_vs_step.png", metric='plddt')
+    plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"lddt_vs_step.png", metric='lddt')
+    plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"tm_score_vs_step.png", metric='tm_score')
     df.to_csv(SAVE_PATH, sep="\t", index=False)
     print("Final results saved.")
 

@@ -5,8 +5,8 @@
 #SBATCH --nodes=1
 #SBATCH --gpus=1
 #SBATCH --time=5:00:00
-#SBATCH --output=./jobs/msa_lr_%1_ags_%2_grad_clip_max_norm_%3_%A_%a.out
-#SBATCH --error=./jobs/msa_lr_%1_ags_%2_grad_clip_max_norm_%3_%A_%a.err
+#SBATCH --output=./jobs/msa_lr_%1_ags_%2_grad_clip_max_norm_%3_%A.out
+#SBATCH --error=./jobs/msa_lr_%1_ags_%2_grad_clip_max_norm_%3_%A.err
 
 # Activate conda environment
 
