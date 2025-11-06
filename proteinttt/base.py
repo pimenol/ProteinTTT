@@ -55,6 +55,8 @@ class TTTConfig:
         log_file_path: Path to save log file
         log_name: Name for logger
         logger_level: Logging verbosity level
+        gradient_clip: Whether to apply gradient clipping to prevent instability
+        gradient_clip_max_norm: Maximum gradient norm for clipping (only used if gradient_clip=True)
     """
 
     lr: float = 4e-4
@@ -94,6 +96,8 @@ class TTTConfig:
     logger_level: str = (
         "INFO"  # T.Literal['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
     )
+    gradient_clip: bool = False  # Whether to use gradient clipping
+    gradient_clip_max_norm: float = 1.0  # Maximum gradient norm for clipping
 
     @classmethod
     def from_yaml(cls, yaml_path: str | Path) -> "TTTConfig":
@@ -468,13 +472,9 @@ class TTTModule(torch.nn.Module, ABC):
 
             # Backward pass
             loss.backward()
-            # if (step + 1) % self.ttt_cfg.ags == 0:
-            #     optimizer.step()
-            #     optimizer.zero_grad()
-            
-            # Check for NaN/Inf gradients to prevent numerical instability
+
+            # Check for NaN/Inf gradients and apply gradient clipping if enabled
             if (step + 1) % self.ttt_cfg.ags == 0:
-                # Get trainable parameters with gradients
                 trainable_params = [p for p in self.parameters() if p.requires_grad and p.grad is not None]
                 
                 # Check for NaN/Inf gradients - skip update if found (this prevents crashes)
@@ -490,7 +490,13 @@ class TTTModule(torch.nn.Module, ABC):
                     import warnings
                     warnings.warn(f"NaN/Inf gradient detected at step {step}, skipping update")
                 else:
-                    # Normal optimizer step - no to preserve TTT training dynamics
+                    # Apply gradient clipping if enabled in config
+                    if self.ttt_cfg.gradient_clip and len(trainable_params) > 0:
+                        torch.nn.utils.clip_grad_norm_(
+                            trainable_params, 
+                            max_norm=self.ttt_cfg.gradient_clip_max_norm
+                        )
+                    
                     optimizer.step()
                     optimizer.zero_grad()
             self.eval()
