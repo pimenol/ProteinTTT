@@ -42,12 +42,12 @@ def set_dynamic_chunk_size(model, sequence_length):
     return chunk_size
 
 
-def main(lr, ags, grad_clip_max_norm):
+def main(lr, ags, grad_clip_max_norm, lora_rank = 32, lora_alpha = 64.0):
 
     base_path = Path("/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/data/bfvd/")
     JOB_SUFFIX = os.getenv("SLURM_JOB_ID", str(uuid.uuid4()))
 
-    OUTPUTS_PATH = base_path / f'experement_{lr}_{ags}_{grad_clip_max_norm}_{JOB_SUFFIX}'
+    OUTPUTS_PATH = base_path / 'experements_msa' /f'experement_{lr}_{ags}_{grad_clip_max_norm}_{lora_rank}_{lora_alpha}_{JOB_SUFFIX}'
     OUT_DIR = OUTPUTS_PATH /'predicted_structures'
     LOGS_DIR = OUTPUTS_PATH / 'logs' 
     SAVE_PATH = OUTPUTS_PATH / "results.tsv"
@@ -77,6 +77,8 @@ def main(lr, ags, grad_clip_max_norm):
     ttt_cfg.msa = True
     ttt_cfg.gradient_clip = True
     ttt_cfg.gradient_clip_max_norm = grad_clip_max_norm
+    ttt_cfg.lora_rank = lora_rank
+    ttt_cfg.lora_alpha = lora_alpha
 
     # ttt_cfg.loss_kind == "msa_soft_labels"
     model = ESMFoldTTT.ttt_from_pretrained(
@@ -165,7 +167,7 @@ def main(lr, ags, grad_clip_max_norm):
     processed_count = 0
 
     print(f"{SUMMARY_PATH}")
-    print(f" Learning rate: {lr}, AGS: {ags}, Grad clip max norm: {grad_clip_max_norm}")
+    print(f" Learning rate: {lr}, AGS: {ags}, Grad clip max norm: {grad_clip_max_norm}, LoRA rank: {model.ttt_cfg.lora_rank}, LoRA alpha: {model.ttt_cfg.lora_alpha}")
 
     columns_to_add = [f'pLDDT_{lr}_{ags}', f'lddt_{lr}_{ags}', f'tm_score_{lr}_{ags}']
     for col_name in columns_to_add:
@@ -216,12 +218,13 @@ def main(lr, ags, grad_clip_max_norm):
         plddt_df_before = df.at[i, 'pLDDT_before'] if 'pLDDT_before' in df.columns else None
         plddt_df_before_str = f"{plddt_df_before:.2f}" if plddt_df_before is not None and not pd.isna(plddt_df_before) else "N/A"
         
-        print(f"Processed sequence {i} (ID: {seq_id}). pLDDT before df: {plddt_df_before_str}, predicted: {plddt_before_str}, after: {plddt_after_str}")
+        print(f"Processed sequence {i} (ID: {seq_id}), before: {plddt_before_str}, after with MSA: {plddt_after_str}, after without MSA: {plddt_df_before_str}")
 
+    df.to_csv(SAVE_PATH, sep="\t", index=False)
     plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"plddt_vs_step.png", metric='plddt')
     plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"lddt_vs_step.png", metric='lddt')
     plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"tm_score_vs_step.png", metric='tm_score')
-    df.to_csv(SAVE_PATH, sep="\t", index=False)
+
     print("Final results saved.")
 
 
@@ -231,7 +234,9 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, required=True, help='LR parameter for ProteinTTT.')
     parser.add_argument('--ags', type=int, required=True, help='AGS parameter for ProteinTTT.')
     parser.add_argument('--grad_clip_max_norm', type=float, required=True, help='Grad clip max norm for ProteinTTT.')
+    parser.add_argument('--lora_rank', type=int, required=True, help='LoRA rank for ProteinTTT.')
+    parser.add_argument('--lora_alpha', type=float, required=True, help='LoRA alpha for ProteinTTT.')
 
     args = parser.parse_args()
 
-    main(args.lr, args.ags, args.grad_clip_max_norm)
+    main(args.lr, args.ags, args.grad_clip_max_norm, args.lora_rank, args.lora_alpha)
