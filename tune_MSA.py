@@ -41,20 +41,23 @@ def set_dynamic_chunk_size(model, sequence_length):
     return chunk_size
 
 
-def main(lr, ags):
+def main(lr, ags, grad_clip_max_norm):
 
     base_path = Path("/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/data/bfvd/")
-    OUT_DIR = base_path /'predicted_structures_msa'/ f'predicted_structures_msa_{lr}_{ags}'
+    JOB_SUFFIX = os.getenv("SLURM_JOB_ID", str(uuid.uuid4()))
+
+    OUTPUTS_PATH = base_path / f'experement_{lr}_{ags}_{grad_clip_max_norm}_{JOB_SUFFIX}'
+    OUT_DIR = OUTPUTS_PATH /'predicted_structures'
+    LOGS_DIR = OUTPUTS_PATH / 'logs' 
+    SAVE_PATH = OUTPUTS_PATH / "results.tsv"
+
     SUMMARY_PATH = base_path / 'proteinttt_msa_testset.tsv'
-    LOGS_DIR = base_path / 'logs_msa' / f'logs_msa_{lr}_{ags}'
     CORRECT_PREDICTED_PDB = Path("/scratch/project/open-35-8/antonb/bfvd/bfvd")
     MSA_PATH = Path("/scratch/project/open-35-8/antonb/bfvd/bfvd_msa")
-    JOB_SUFFIX = os.getenv("SLURM_JOB_ID", str(uuid.uuid4()))
-    SAVE_PATH = base_path / 'results_msa' / f"results_{JOB_SUFFIX}.tsv"
 
+    OUTPUTS_PATH.mkdir(parents=True, exist_ok=True)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    # SAVE_PATH.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(SUMMARY_PATH, sep="\t")
 
@@ -69,6 +72,8 @@ def main(lr, ags):
     ttt_cfg.lr = lr
     ttt_cfg.ags = ags
     ttt_cfg.msa = True
+    ttt_cfg.gradient_clip = True
+    ttt_cfg.gradient_clip_max_norm = grad_clip_max_norm
 
     # ttt_cfg.loss_kind == "msa_soft_labels"
     model = ESMFoldTTT.ttt_from_pretrained(
@@ -139,6 +144,7 @@ def main(lr, ags):
         except Exception as e:
             # Reset model on any error to ensure clean state for next sequence
             warnings.warn(f"Error in fold_chain for {pdb_id}, resetting model: {e}")
+            sys.exit(1)
             for name, param in model.named_parameters():
                 if param.requires_grad and name in initial_model_state:
                     param.data.copy_(initial_model_state[name])
@@ -156,7 +162,7 @@ def main(lr, ags):
     processed_count = 0
 
     print(f"{SUMMARY_PATH}")
-    print(f" Learning rate: {lr}, AGS: {ags}")
+    print(f" Learning rate: {lr}, AGS: {ags}, Grad clip max norm: {grad_clip_max_norm}")
 
     columns_to_add = [f'pLDDT_{lr}_{ags}', f'lddt_{lr}_{ags}', f'tm_score_{lr}_{ags}']
     for col_name in columns_to_add:
@@ -218,7 +224,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run ESMFold and ProteinTTT on a chunk of sequences.")
     parser.add_argument('--lr', type=float, required=True, help='LR parameter for ProteinTTT.')
     parser.add_argument('--ags', type=int, required=True, help='AGS parameter for ProteinTTT.')
+    parser.add_argument('--grad_clip_max_norm', type=float, required=True, help='Grad clip max norm for ProteinTTT.')
 
     args = parser.parse_args()
 
-    main(args.lr, args.ags)
+    main(args.lr, args.ags, args.grad_clip_max_norm)

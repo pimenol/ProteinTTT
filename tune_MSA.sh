@@ -5,8 +5,8 @@
 #SBATCH --nodes=1
 #SBATCH --gpus=1
 #SBATCH --time=5:00:00
-#SBATCH --output=./jobs/msa_%A_%a.out
-#SBATCH --error=./jobs/msa_%A_%a.err
+#SBATCH --output=./jobs/msa_lr_%1_ags_%2_grad_clip_max_norm_%3_%A_%a.out
+#SBATCH --error=./jobs/msa_lr_%1_ags_%2_grad_clip_max_norm_%3_%A_%a.err
 
 # Activate conda environment
 
@@ -15,6 +15,6 @@ conda activate proteinttt
 
 cd /scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT || exit 1
 
-python3 tune_MSA.py --lr "$1" --ags "$2" 
+python3 tune_MSA.py --lr "$1" --ags "$2" --grad_clip_max_norm "$3"
 
 echo "Job finished successfully."
