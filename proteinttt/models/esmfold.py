@@ -88,11 +88,6 @@ class ESMFoldTTT(TTTModule, ESMFold):
         pdb_str = self.output_to_pdb(output)
         plddt = output["mean_plddt"].item()
 
-        # Create temporary files for predicted and true PDBs
-        # pred_path is derived from the predicted PDB string
-        # true_path is derived from msa_pth which is a Path object, likely to a PDB file or similar
-        
-        # Save the predicted PDB string to a temporary file
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pdb') as tmp_file:
             pred_path = Path(tmp_file.name)
             pdb_str_to_write = pdb_str[0] if isinstance(pdb_str, list) else pdb_str
