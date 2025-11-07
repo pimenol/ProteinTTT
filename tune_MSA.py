@@ -42,13 +42,22 @@ def set_dynamic_chunk_size(model, sequence_length):
     return chunk_size
 
 
-def main(lr, ags, grad_clip_max_norm, lora_rank = 32, lora_alpha = 64.0):
+def main(lr, ags, grad_clip_max_norm, lora_rank, lora_alpha):
 
     base_path = Path("/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/data/bfvd/")
     JOB_SUFFIX = os.getenv("SLURM_JOB_ID", str(uuid.uuid4()))
 
-    OUTPUTS_PATH = base_path / 'experements_msa' /f'experement_{lr}_{ags}_{grad_clip_max_norm}_{lora_rank}_{lora_alpha}_{JOB_SUFFIX}'
-    OUT_DIR = OUTPUTS_PATH /'predicted_structures'
+    experiment_pattern = f'experement_{lr}_{ags}_{grad_clip_max_norm}_{lora_rank}_{lora_alpha}_*'
+    matching_dirs = list((base_path / 'experements_msa').glob(experiment_pattern))
+    if matching_dirs:
+        print(f"Experiment {lr}_{ags}_{grad_clip_max_norm}_{lora_rank}_{lora_alpha} already exists")
+        OUTPUTS_PATH = matching_dirs[0]
+    else:
+        OUTPUTS_PATH = base_path / 'experements_msa' /f'experement_{lr}_{ags}_{grad_clip_max_norm}_{lora_rank}_{lora_alpha}_{JOB_SUFFIX}'
+        OUTPUTS_PATH.mkdir(parents=True, exist_ok=True)
+
+
+    OUT_DIR = OUTPUTS_PATH / 'predicted_structures'
     LOGS_DIR = OUTPUTS_PATH / 'logs' 
     SAVE_PATH = OUTPUTS_PATH / "results.tsv"
     PLOT_PATH = OUTPUTS_PATH / 'plots'
@@ -57,7 +66,6 @@ def main(lr, ags, grad_clip_max_norm, lora_rank = 32, lora_alpha = 64.0):
     CORRECT_PREDICTED_PDB = Path("/scratch/project/open-35-8/antonb/bfvd/bfvd")
     MSA_PATH = Path("/scratch/project/open-35-8/antonb/bfvd/bfvd_msa")
 
-    OUTPUTS_PATH.mkdir(parents=True, exist_ok=True)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     PLOT_PATH.mkdir(parents=True, exist_ok=True)
@@ -97,7 +105,9 @@ def main(lr, ags, grad_clip_max_norm, lora_rank = 32, lora_alpha = 64.0):
             torch.cuda.synchronize()
 
         out_path = out_dir / f"{pdb_id}{tag}.pdb"
-        out_path.write_text(pdb_str)
+        # Use buffered write for better I/O performance
+        with open(out_path, 'w', buffering=8192) as f:
+            f.write(pdb_str)
 
         struct = bsio.load_structure(out_path, extra_fields=["b_factor"])
         pLDDT = float(np.asarray(struct.b_factor, dtype=float).mean())
@@ -150,11 +160,6 @@ def main(lr, ags, grad_clip_max_norm, lora_rank = 32, lora_alpha = 64.0):
             # Reset model on any error to ensure clean state for next sequence
             warnings.warn(f"Error in fold_chain for {pdb_id}, resetting model: {e}")
             sys.exit(1)
-            for name, param in model.named_parameters():
-                if param.requires_grad and name in initial_model_state:
-                    param.data.copy_(initial_model_state[name])
-            model.ttt_reset()
-            raise
 
     def calculate_metrics(true_path, pred_path):
         tm_score = calculate_tm_score(pred_path, true_path)
@@ -166,66 +171,76 @@ def main(lr, ags, grad_clip_max_norm, lora_rank = 32, lora_alpha = 64.0):
     col = 'sequence'
     processed_count = 0
 
+    start_total_time = time.time()
+
     print(f"{SUMMARY_PATH}")
     print(f" Learning rate: {lr}, AGS: {ags}, Grad clip max norm: {grad_clip_max_norm}, LoRA rank: {model.ttt_cfg.lora_rank}, LoRA alpha: {model.ttt_cfg.lora_alpha}")
 
-    columns_to_add = [f'pLDDT_{lr}_{ags}', f'lddt_{lr}_{ags}', f'tm_score_{lr}_{ags}']
+    columns_to_add = [f'pLDDT_after', f'lddt_after', f'tm_score_after']
     for col_name in columns_to_add:
         if col_name not in df.columns:
             df[col_name] = np.nan
 
     for i, row in df.iterrows():
+        start_time = time.time()
         seq_id = str(row.get("id"))
         seq = str(row[col]).strip().upper()
         processed_count += 1
 
-        pLDDT_before, pLDDT_after, tm_score_after, lddt_after = None, None, None, None
+        pLDDT_after, tm_score_after, lddt_after = None, None, None
 
-        try:
-            pLDDT_before, pLDDT_after = fold_chain(seq, seq_id, model=model)
-        except Exception as e:
-            warnings.warn(f"Error folding chain {seq_id}: {e}")
-            traceback.print_exc()
-            # Ensure model is in a good state for next iteration
-            try:
-                weights_valid, msg = check_model_weights(model)
-                if not weights_valid:
-                    warnings.warn(f"Resetting model after error: {msg}")
-                    for name, param in model.named_parameters():
-                        if param.requires_grad and name in initial_model_state:
-                            param.data.copy_(initial_model_state[name])
-                    model.ttt_reset()
-            except Exception as reset_error:
-                warnings.warn(f"Error resetting model: {reset_error}")
-
-        try:
-            if pLDDT_after is not None:  # Only calculate metrics if folding succeeded
-                tm_score_after, lddt_after = calculate_metrics(
+        if os.path.exists(LOGS_DIR / f'{seq_id}_log.tsv'):
+            print(f"Sequence {seq_id} already processed")
+            tm_score_after, lddt_after = calculate_metrics(
                     true_path=CORRECT_PREDICTED_PDB / f"{seq_id}.pdb",
                     pred_path=OUT_DIR / f"{seq_id}_ttt.pdb"
                 )
-        except Exception as e:
-            warnings.warn(f"Metrics for {seq_id}: {e}")
-            traceback.print_exc()
+            pLDDT_after = float(np.asarray(bsio.load_structure(OUT_DIR / f"{seq_id}_ttt.pdb", extra_fields=["b_factor"]).b_factor, dtype=float).mean())
+        else:
+            try:
+                _ , pLDDT_after = fold_chain(seq, seq_id, model=model)
+            except Exception as e:
+                warnings.warn(f"Error folding chain {seq_id}: {e}")
+                traceback.print_exc()
+                # Ensure model is in a good state for next iteration
+                try:
+                    weights_valid, msg = check_model_weights(model)
+                    if not weights_valid:
+                        warnings.warn(f"Resetting model after error: {msg}")
+                        for name, param in model.named_parameters():
+                            if param.requires_grad and name in initial_model_state:
+                                param.data.copy_(initial_model_state[name])
+                        model.ttt_reset()
+                except Exception as reset_error:
+                    warnings.warn(f"Error resetting model: {reset_error}")
 
-        df.at[i, columns_to_add[0]] = pLDDT_after
-        df.at[i, columns_to_add[1]] = lddt_after
-        df.at[i, columns_to_add[2]] = tm_score_after
+            try:
+                if pLDDT_after is not None:  # Only calculate metrics if folding succeeded
+                    tm_score_after, lddt_after = calculate_metrics(
+                        true_path=CORRECT_PREDICTED_PDB / f"{seq_id}.pdb",
+                        pred_path=OUT_DIR / f"{seq_id}_ttt.pdb"
+                    )
+            except Exception as e:
+                warnings.warn(f"Metrics for {seq_id}: {e}")
+                traceback.print_exc()
 
-        # Safe printing with None handling
-        plddt_before_str = f"{pLDDT_before:.2f}" if pLDDT_before is not None else "N/A"
-        plddt_after_str = f"{pLDDT_after:.2f}" if pLDDT_after is not None else "N/A"
-        plddt_df_before = df.at[i, 'pLDDT_before'] if 'pLDDT_before' in df.columns else None
-        plddt_df_before_str = f"{plddt_df_before:.2f}" if plddt_df_before is not None and not pd.isna(plddt_df_before) else "N/A"
-        
-        print(f"Processed sequence {i} (ID: {seq_id}), before: {plddt_before_str}, after with MSA: {plddt_after_str}, after without MSA: {plddt_df_before_str}")
+        df.at[i, 'pLDDT_after'] = pLDDT_after
+        df.at[i, 'lddt_after'] = lddt_after
+        df.at[i, 'tm_score_after'] = tm_score_after
+
+        print(f"Processed sequence {i} (ID: {seq_id}), before: {df.at[i, 'pLDDT_before']:.2f}, after with MSA: {pLDDT_after}, time: {time.time() - start_time:.2f}")
 
     df.to_csv(SAVE_PATH, sep="\t", index=False)
-    plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"plddt_vs_step.png", metric='plddt')
-    plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"lddt_vs_step.png", metric='lddt')
-    plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"tm_score_vs_step.png", metric='tm_score')
+    plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"plddt_vs_step_best_plddt.png", metric='plddt')
+    plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"lddt_vs_step_best_plddt.png", metric='lddt')
+    plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"tm_score_vs_step_best_plddt.png", metric='tm_score')
 
-    print("Final results saved.")
+    plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"plddt_vs_step_no_best_plddt.png", metric='plddt', choose_best_plddt=False)
+    plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"lddt_vs_step_no_best_plddt.png", metric='lddt', choose_best_plddt=False)
+    plot_mean_scores_vs_step(LOGS_DIR, output_path=PLOT_PATH / f"tm_score_vs_step_no_best_plddt.png", metric='tm_score', choose_best_plddt=False)
+
+    print(f"Final results saved. Total time elapsed: {time.time() - start_total_time:.2f} seconds for {processed_count} sequences.")
+    warnings.warn(f"Final results saved. Total time elapsed: {time.time() - start_total_time:.2f} seconds for {processed_count} sequences.")
 
 
 if __name__ == "__main__":
