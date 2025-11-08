@@ -6,6 +6,7 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass
+import warnings 
 
 import pandas as pd
 import torch
@@ -316,7 +317,7 @@ class TTTModule(torch.nn.Module, ABC):
         # Get trainable parameters and optimizer
         parameters = self._ttt_get_parameters()
         optimizer = self._ttt_get_optimizer(parameters)
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
 
         # Initialize dictionaries to store results and metrics each TTT step
         df = []
@@ -328,12 +329,23 @@ class TTTModule(torch.nn.Module, ABC):
         if self.ttt_cfg.automatic_best_state_reset:
             best_confidence = 0
             best_state = None
-        
+
+        total_steps = self.ttt_cfg.steps * self.ttt_cfg.ags
+        score_steps_set = (
+            set(self.ttt_cfg.score_seq_steps_list)
+            if self.ttt_cfg.score_seq_steps_list is not None
+            else None
+        )
+        device = next(self.parameters()).device
+        non_blocking = device.type == "cuda"
+        cached_trainable_params = [p for p in self.parameters() if p.requires_grad]
+
         # Run TTT loop
         # x = x.to(next(self.parameters()).device)
         loss = None
         self.eval()
-        for step in range(self.ttt_cfg.steps * self.ttt_cfg.ags + 1):
+        is_eval_mode = True
+        for step in range(total_steps + 1):
             # Sample batch
             batch_masked, targets, mask, start_indices = self._ttt_sample_batch(
                 x
@@ -348,12 +360,15 @@ class TTTModule(torch.nn.Module, ABC):
                     last_step_time = time.time()
                 ttt_step_time = time.time() - last_step_time
 
+                # Ensure eval mode only when needed
+                if not is_eval_mode:
+                    self.eval()
+                    is_eval_mode = True
+
                 # Score sequence
                 all_log_probs, perplexity = None, None
                 should_score = self.ttt_cfg.score_seq_kind is not None and (
-                    self.ttt_cfg.score_seq_steps_list is None
-                    or (step // self.ttt_cfg.ags)
-                    in self.ttt_cfg.score_seq_steps_list
+                    score_steps_set is None or (step // self.ttt_cfg.ags) in score_steps_set
                 )
                 if should_score:
                     score_seq_start_time = time.time()
@@ -397,9 +412,9 @@ class TTTModule(torch.nn.Module, ABC):
                             best_state = self._ttt_get_state()
                 else:
                     eval_step_metric_dict = {}
-                ttt_step_data[step // self.ttt_cfg.ags][
-                    "eval_step_preds"
-                ] = eval_step_preds
+                    eval_step_preds = None
+                if eval_step_preds is not None:
+                    ttt_step_data[step // self.ttt_cfg.ags]["eval_step_preds"] = eval_step_preds
 
                 # Store all metrics in a row
                 row = dict(
@@ -437,19 +452,22 @@ class TTTModule(torch.nn.Module, ABC):
                         break
 
             # Last step is just for logging
-            if step == self.ttt_cfg.steps * self.ttt_cfg.ags:
+            if step == total_steps:
                 break
-            
+
             # Move the sampled batch to the GPU
-            device = next(self.parameters()).device
-            batch_masked = batch_masked.to(device)
-            targets = targets.to(device)
-            mask = mask.to(device)
+            batch_masked = batch_masked.to(device, non_blocking=non_blocking)
+            targets = targets.to(device, non_blocking=non_blocking)
+            mask = mask.to(device, non_blocking=non_blocking)
             if start_indices is not None:
-                start_indices = start_indices.to(device)
-                
+                start_indices = start_indices.to(device, non_blocking=non_blocking)
+
+            # Ensure train mode only when needed
+            if is_eval_mode:
+                self.train()
+                is_eval_mode = False
+
             # Forward pass
-            self.train()
             logits = self._ttt_predict_logits(
                 batch_masked, start_indices, **kwargs
             )
@@ -475,7 +493,7 @@ class TTTModule(torch.nn.Module, ABC):
 
             # Check for NaN/Inf gradients and apply gradient clipping if enabled
             if (step + 1) % self.ttt_cfg.ags == 0:
-                trainable_params = [p for p in self.parameters() if p.requires_grad and p.grad is not None]
+                trainable_params = [p for p in cached_trainable_params if p.grad is not None]
                 
                 # Check for NaN/Inf gradients - skip update if found (this prevents crashes)
                 has_nan_grad = False
@@ -486,8 +504,7 @@ class TTTModule(torch.nn.Module, ABC):
                 
                 if has_nan_grad:
                     # Skip this update and zero gradients to prevent model corruption
-                    optimizer.zero_grad()
-                    import warnings
+                    optimizer.zero_grad(set_to_none=True)
                     warnings.warn(f"NaN/Inf gradient detected at step {step}, skipping update")
                 else:
                     # Apply gradient clipping if enabled in config
@@ -498,7 +515,10 @@ class TTTModule(torch.nn.Module, ABC):
                         )
                     
                     optimizer.step()
-                    optimizer.zero_grad()
+                    optimizer.zero_grad(set_to_none=True)
+
+        # Ensure we end in eval mode
+        if not is_eval_mode:
             self.eval()
 
         # Reset to best state to have the most confident model after TTT
