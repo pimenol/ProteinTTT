@@ -99,6 +99,10 @@ class TTTConfig:
     )
     gradient_clip: bool = False  # Whether to use gradient clipping
     gradient_clip_max_norm: float = 1.0  # Maximum gradient norm for clipping
+    # Learning rate scheduler configuration
+    lr_scheduler: str | None = None  # None, 'cosine', 'cosine_warmup'
+    lr_warmup_steps: int = 0  
+    lr_min: float = 0.0  # minimum LR for cosine annealing
 
     @classmethod
     def from_yaml(cls, yaml_path: str | Path) -> "TTTConfig":
@@ -340,6 +344,28 @@ class TTTModule(torch.nn.Module, ABC):
         non_blocking = device.type == "cuda"
         cached_trainable_params = [p for p in self.parameters() if p.requires_grad]
 
+        # Setup LR scheduler 
+        scheduler = None
+        if self.ttt_cfg.lr_scheduler == "cosine":
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=self.ttt_cfg.steps, eta_min=self.ttt_cfg.lr_min
+            )
+        elif self.ttt_cfg.lr_scheduler == "cosine_warmup":
+            import math
+            warmup = max(0, int(self.ttt_cfg.lr_warmup_steps))
+            min_factor = (
+                self.ttt_cfg.lr_min / self.ttt_cfg.lr if self.ttt_cfg.lr > 0 else 0.0
+            )
+
+            def lr_mult(step_idx: int):
+                # step_idx counts optimizer steps: 0..steps-1
+                if warmup > 0 and step_idx < warmup:
+                    return (step_idx + 1) / max(1, warmup)
+                progress = (step_idx - warmup) / max(1, self.ttt_cfg.steps - warmup)
+                return min_factor + 0.5 * (1.0 - min_factor) * (1.0 + math.cos(math.pi * progress))
+
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_mult)
+
         # Run TTT loop
         # x = x.to(next(self.parameters()).device)
         loss = None
@@ -425,6 +451,7 @@ class TTTModule(torch.nn.Module, ABC):
                     ttt_step_time=ttt_step_time,
                     score_seq_time=score_seq_time,
                     eval_step_time=eval_step_time,
+                    lr=optimizer.param_groups[0]["lr"],
                     **eval_step_metric_dict,
                 )
                 df.append(row)
@@ -515,6 +542,8 @@ class TTTModule(torch.nn.Module, ABC):
                         )
                     
                     optimizer.step()
+                    if scheduler is not None:
+                        scheduler.step()
                     optimizer.zero_grad(set_to_none=True)
 
         # Ensure we end in eval mode
