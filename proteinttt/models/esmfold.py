@@ -26,6 +26,8 @@ class ESMFoldTTT(TTTModule, ESMFold):
             "ESM-1b"
         )  # ESM2 uses ESM-1b alphabet
         self.ttt_batch_converter = self.ttt_alphabet.get_batch_converter()
+        # Reusable temp file path to avoid creating new temp files each eval step
+        self._ttt_temp_pdb_path = None
 
     def _ttt_tokenize(self, seq: str, **kwargs) -> torch.Tensor:
         _, _, x = self.ttt_batch_converter([(None, seq)])
@@ -63,6 +65,14 @@ class ESMFoldTTT(TTTModule, ESMFold):
         return self.esm(batch)[
             "logits"
         ]  # [bs, seq_len] -> [bs, seq_len, vocab_size]
+    
+    def ttt_reset(self) -> None:
+        """Reset model and cleanup temporary files."""
+        super().ttt_reset()
+        # Clean up temporary PDB file if it exists
+        if self._ttt_temp_pdb_path is not None and self._ttt_temp_pdb_path.exists():
+            self._ttt_temp_pdb_path.unlink()
+            self._ttt_temp_pdb_path = None
 
     def _ttt_eval_step(
         self,
@@ -88,18 +98,27 @@ class ESMFoldTTT(TTTModule, ESMFold):
         pdb_str = self.output_to_pdb(output)
         plddt = output["mean_plddt"].item()
 
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pdb') as tmp_file:
-            pred_path = Path(tmp_file.name)
+        # Only calculate expensive structural metrics if correct_pdb_path is provided
+        tm_score = None
+        lddt = None
+        if correct_pdb_path is not None:
+            # Create or reuse temp file path to avoid overhead of creating new temp files each step
+            if self._ttt_temp_pdb_path is None:
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pdb') as tmp_file:
+                    self._ttt_temp_pdb_path = Path(tmp_file.name)
+            
+            # Write PDB string to temp file with buffering for better I/O performance
             pdb_str_to_write = pdb_str[0] if isinstance(pdb_str, list) else pdb_str
-            tmp_file.write(pdb_str_to_write)
-
-        tm_score = calculate_tm_score(pred_path, correct_pdb_path)
-        lddt = lddt_score(correct_pdb_path, pred_path)
+            with open(self._ttt_temp_pdb_path, 'w', buffering=8192) as f:
+                f.write(pdb_str_to_write)
+            
+            # Calculate structural metrics
+            tm_score = calculate_tm_score(self._ttt_temp_pdb_path, correct_pdb_path)
+            lddt = lddt_score(correct_pdb_path, self._ttt_temp_pdb_path)
 
         # Store predictions
         eval_step_preds = {"pdb": pdb_str}
         eval_step_metric_dict = {"plddt": plddt, "tm_score": tm_score, "lddt": lddt}
         confidence = plddt
 
-        pred_path.unlink() # Moved deletion to here
         return eval_step_preds, eval_step_metric_dict, confidence
