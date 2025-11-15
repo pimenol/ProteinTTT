@@ -215,6 +215,52 @@ def extract_cdr_to_new_pdb(input_pdb_path, output_pdb_path, chain, is_heavy):
         for line in cdr_lines:
             f.write(line)
 
+def extract_sequence_from_pdb(pdb_path, chain=None):
+    parser = PDBParser(QUIET=True)
+    
+    try:
+        structure = parser.get_structure("structure", pdb_path)
+    except Exception as e:
+        print(f"Error parsing PDB {pdb_path}: {e}")
+        return None
+    
+    model = structure[0]
+    
+    # If chain is specified, extract only that chain
+    if chain is not None:
+        if chain in model:
+            seq = ""
+            for residue in model[chain]:
+                if residue.id[0] == ' ':
+                    resname = residue.get_resname()
+                    try:
+                        seq += seq1(resname)
+                    except KeyError:
+                        print(f"Warning: Unknown residue {resname} in chain {chain}. Skipping.")
+                        continue
+            return seq
+        else:
+            print(f"Chain {chain} not found in structure.")
+            return None
+    
+    # If no chain specified, return all sequences as a dictionary
+    sequences = {}
+    for chain_obj in model:
+        chain_id = chain_obj.get_id()
+        seq = ""
+        for residue in chain_obj:
+            if residue.id[0] == ' ':
+                resname = residue.get_resname()
+                try:
+                    seq += seq1(resname)
+                except KeyError:
+                    print(f"Warning: Unknown residue {resname} in chain {chain_id}. Skipping.")
+                    continue
+        sequences[chain_id] = seq
+    
+    return sequences
+
+
 def fetch_and_parse_sequences(df, pdb_dir, id_column='pdb'):
     parser = PDBParser(QUIET=True)
     output_rows = []
@@ -302,79 +348,3 @@ def extract_h3_to_new_pdb(input_pdb_path, output_pdb_path, chain, is_heavy):
     with open(output_pdb_path, 'w') as f:
         for line in cdr_lines:
             f.write(line)
-
-
-from Bio.PDB import PDBList, MMCIFParser, PDBIO, Select
-import os
-
-
-def download_structure_and_extract_chain(pdb_code: str, chain_id: str, output_dir: str = './') -> str:
-    """
-    Downloads a PDB or mmCIF structure, extracts a specific chain, and saves it to a new PDB file.
-    This function handles both modern mmCIF and legacy PDB formats.
-
-    Args:
-        pdb_code (str): The 4-character PDB or PDBx/mmCIF identifier.
-        chain_id (str): The ID of the chain to extract (e.g., 'A', 'BM').
-        output_dir (str): The directory where the output file will be saved. Defaults to the current directory.
-
-    Returns:
-        str: The path to the newly created PDB file containing only the specified chain.
-    """
-    # Ensure the output directory exists
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    # --- Step 1: Download the structure file ---
-    pdbl = PDBList()
-    # We will try to download in mmCIF format first, as it's the standard for large structures.
-    # The 'retrieve_pdb_file' function returns the exact path to the downloaded file.
-    try:
-        file_path = pdbl.retrieve_pdb_file(pdb_code, pdir=output_dir, file_format='mmCif')
-        if not os.path.exists(file_path):
-            # Fallback to pdb format if mmCIF fails or doesn't exist
-            file_path = pdbl.retrieve_pdb_file(pdb_code, pdir=output_dir, file_format='pdb')
-    except Exception as e:
-        print(f"Failed to download structure {pdb_code}. Error: {e}")
-        return None
-
-    # Check if download was successful
-    if not os.path.exists(file_path):
-        print(f"Could not download or find the file for PDB code {pdb_code}.")
-        return None
-
-    # --- Step 2: Parse the structure and select the chain ---
-    parser = MMCIFParser(QUIET=True)
-    structure = parser.get_structure(pdb_code, file_path)
-
-    # Define a custom class to select only the desired chain
-    class ChainSelect(Select):
-        def __init__(self, required_chain_id):
-            self.required_chain_id = required_chain_id
-
-        def accept_chain(self, chain):
-            return chain.id == self.required_chain_id
-
-    # --- Step 3: Write the selected chain to a new PDB file ---
-    io = PDBIO()
-    io.set_structure(structure)
-
-    output_filename = f"{pdb_code}_{chain_id}.pdb"
-    output_path = os.path.join(output_dir, output_filename)
-
-    # Save the structure, using the selector to filter for the specific chain
-    io.save(output_path, ChainSelect(chain_id))
-
-    print(f"Successfully extracted chain {chain_id} from {pdb_code} and saved to {output_path}")
-
-    # --- Step 4: Clean up the downloaded source file and directory ---
-    try:
-        os.remove(file_path)
-        # Attempt to remove the directory PDBList creates (e.g., 'yf/' for '6yfg')
-        # This will only succeed if the directory is empty.
-        os.rmdir(os.path.dirname(file_path))
-    except OSError:
-        # This is expected if the directory is not empty or if multiple files were downloaded.
-        pass
-
-    return output_path
