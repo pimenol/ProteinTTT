@@ -97,12 +97,12 @@ class TTTConfig:
     logger_level: str = (
         "INFO"  # T.Literal['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
     )
-    gradient_clip: bool = False  # Whether to use gradient clipping
-    gradient_clip_max_norm: float = 1.0  # Maximum gradient norm for clipping
-    # Learning rate scheduler configuration
+    gradient_clip: bool = False
+    gradient_clip_max_norm: float = 1.0
+
     lr_scheduler: str | None = None  # None, 'cosine', 'cosine_warmup'
     lr_warmup_steps: int = 0  
-    lr_min: float = 0.0  # minimum LR for cosine annealing
+    lr_min: float = 0.0
 
     @classmethod
     def from_yaml(cls, yaml_path: str | Path) -> "TTTConfig":
@@ -269,7 +269,6 @@ class TTTModule(torch.nn.Module, ABC):
         self,
         seq: T.Optional[str] = None,
         msa_pth: T.Optional[Path] = None,
-        correct_pdb_path: T.Optional[Path] = None,
         **kwargs,
     ) -> dict[str, T.Any]:
         """Run test-time training loop to customize model to input protein.
@@ -307,7 +306,7 @@ class TTTModule(torch.nn.Module, ABC):
             ):
                 msa.append(self._ttt_tokenize(seq_msa, **kwargs).squeeze(0))
             msa = torch.stack(msa)  # [msa_len, seq_len]
-            
+
             # Check the MSA contains the target sequence as the first sequence
             assert torch.all(
                 x[0, :] == msa[0, :]
@@ -317,11 +316,10 @@ class TTTModule(torch.nn.Module, ABC):
             # - except for MSA soft labels where MSA is only used for loss calculation
             if not self.ttt_cfg.loss_kind == "msa_soft_labels":
                 x = msa
-                        
         # Get trainable parameters and optimizer
         parameters = self._ttt_get_parameters()
         optimizer = self._ttt_get_optimizer(parameters)
-        optimizer.zero_grad(set_to_none=True)
+        optimizer.zero_grad()
 
         # Initialize dictionaries to store results and metrics each TTT step
         df = []
@@ -334,12 +332,6 @@ class TTTModule(torch.nn.Module, ABC):
             best_confidence = 0
             best_state = None
 
-        total_steps = self.ttt_cfg.steps * self.ttt_cfg.ags
-        score_steps_set = (
-            set(self.ttt_cfg.score_seq_steps_list)
-            if self.ttt_cfg.score_seq_steps_list is not None
-            else None
-        )
         device = next(self.parameters()).device
         non_blocking = device.type == "cuda"
         cached_trainable_params = [p for p in self.parameters() if p.requires_grad]
@@ -367,11 +359,9 @@ class TTTModule(torch.nn.Module, ABC):
             scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_mult)
 
         # Run TTT loop
-        # x = x.to(next(self.parameters()).device)
         loss = None
         self.eval()
-        is_eval_mode = True
-        for step in range(total_steps + 1):
+        for step in range(self.ttt_cfg.steps * self.ttt_cfg.ags + 1):
             # Sample batch
             batch_masked, targets, mask, start_indices = self._ttt_sample_batch(
                 x
@@ -386,15 +376,12 @@ class TTTModule(torch.nn.Module, ABC):
                     last_step_time = time.time()
                 ttt_step_time = time.time() - last_step_time
 
-                # Ensure eval mode only when needed
-                if not is_eval_mode:
-                    self.eval()
-                    is_eval_mode = True
-
                 # Score sequence
                 all_log_probs, perplexity = None, None
                 should_score = self.ttt_cfg.score_seq_kind is not None and (
-                    score_steps_set is None or (step // self.ttt_cfg.ags) in score_steps_set
+                    self.ttt_cfg.score_seq_steps_list is None
+                    or (step // self.ttt_cfg.ags)
+                    in self.ttt_cfg.score_seq_steps_list
                 )
                 if should_score:
                     score_seq_start_time = time.time()
@@ -423,7 +410,6 @@ class TTTModule(torch.nn.Module, ABC):
                         all_log_probs=all_log_probs,
                         seq=seq,
                         msa_pth=msa_pth,
-                        correct_pdb_path=correct_pdb_path,
                         **kwargs,
                     )
                     eval_step_time = time.time() - eval_step_start_time
@@ -479,7 +465,7 @@ class TTTModule(torch.nn.Module, ABC):
                         break
 
             # Last step is just for logging
-            if step == total_steps:
+            if step == self.ttt_cfg.steps * self.ttt_cfg.ags:
                 break
 
             # Move the sampled batch to the GPU
@@ -489,12 +475,8 @@ class TTTModule(torch.nn.Module, ABC):
             if start_indices is not None:
                 start_indices = start_indices.to(device, non_blocking=non_blocking)
 
-            # Ensure train mode only when needed
-            if is_eval_mode:
-                self.train()
-                is_eval_mode = False
-
             # Forward pass
+            self.train()
             logits = self._ttt_predict_logits(
                 batch_masked, start_indices, **kwargs
             )
@@ -517,12 +499,10 @@ class TTTModule(torch.nn.Module, ABC):
 
             # Backward pass
             loss.backward()
-
-            # Check for NaN/Inf gradients and apply gradient clipping if enabled
             if (step + 1) % self.ttt_cfg.ags == 0:
                 trainable_params = [p for p in cached_trainable_params if p.grad is not None]
                 
-                # Check for NaN/Inf gradients - skip update if found (this prevents crashes)
+                # Check for NaN/Inf gradients - skip update if found
                 has_nan_grad = False
                 for param in trainable_params:
                     if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
@@ -545,9 +525,7 @@ class TTTModule(torch.nn.Module, ABC):
                     if scheduler is not None:
                         scheduler.step()
                     optimizer.zero_grad(set_to_none=True)
-
-        # Ensure we end in eval mode
-        if not is_eval_mode:
+                
             self.eval()
 
         # Reset to best state to have the most confident model after TTT
