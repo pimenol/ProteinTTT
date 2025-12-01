@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 import warnings
+import logging
 import pandas as pd
 import numpy as np
 import time
@@ -47,14 +48,26 @@ def main(lr, ags, grad_clip_max_norm, lora_rank, lora_alpha):
     base_path = Path("/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/data/bfvd/")
     JOB_SUFFIX = os.getenv("SLURM_JOB_ID", str(uuid.uuid4()))
 
-    experiment_pattern = f'experement_{lr}_{ags}_{grad_clip_max_norm}_{lora_rank}_{lora_alpha}_*'
+    experiment_pattern = f'experement_{lr}_{ags}_{grad_clip_max_norm}_{lora_rank}_{lora_alpha}_1bdvjksbdvr_*'
     matching_dirs = list((base_path / 'experements_msa').glob(experiment_pattern))
     if matching_dirs:
         print(f"Experiment {lr}_{ags}_{grad_clip_max_norm}_{lora_rank}_{lora_alpha} already exists")
         OUTPUTS_PATH = matching_dirs[0]
     else:
-        OUTPUTS_PATH = base_path / 'experements_msa' /f'experement_{lr}_{ags}_{grad_clip_max_norm}_{lora_rank}_{lora_alpha}_{JOB_SUFFIX}'
+        OUTPUTS_PATH = base_path / 'experements_msa' /f'experement_{lr}_{ags}_{grad_clip_max_norm}_{lora_rank}_{lora_alpha}_100_steps_nom_{JOB_SUFFIX}'
         OUTPUTS_PATH.mkdir(parents=True, exist_ok=True)
+
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(OUTPUTS_PATH / "execution.log"),
+            logging.StreamHandler(sys.stdout)
+        ],
+        force=True
+    )
+    logging.info(f"Experiment output directory: {OUTPUTS_PATH}")
 
 
     OUT_DIR = OUTPUTS_PATH / 'predicted_structures'
@@ -78,7 +91,7 @@ def main(lr, ags, grad_clip_max_norm, lora_rank, lora_alpha):
     base_model.set_chunk_size(128)
     ttt_cfg = DEFAULT_ESMFOLD_TTT_CFG
 
-    ttt_cfg.steps = 20
+    ttt_cfg.steps = 100
     ttt_cfg.seed = 0
     ttt_cfg.lr = lr
     ttt_cfg.ags = ags
@@ -87,6 +100,12 @@ def main(lr, ags, grad_clip_max_norm, lora_rank, lora_alpha):
     ttt_cfg.gradient_clip_max_norm = grad_clip_max_norm
     ttt_cfg.lora_rank = lora_rank
     ttt_cfg.lora_alpha = lora_alpha
+    # ttt_cfg.momentum = 0.9
+    # learning rate scheduler
+    # ttt_cfg.lr_scheduler = "cosine_warmup"
+    # ttt_cfg.lr_warmup_steps = 5  # optimizer steps (not micro steps)
+    # ttt_cfg.lr_min = 0.0
+    logging.info(f"TTT config: {ttt_cfg}")
 
     # ttt_cfg.loss_kind == "msa_soft_labels"
     model = ESMFoldTTT.ttt_from_pretrained(
