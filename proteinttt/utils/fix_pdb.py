@@ -1,6 +1,7 @@
 import argparse
-from Bio.PDB import PDBParser, PDBIO
+from Bio.PDB import PDBParser, PDBIO, Structure, Model, Chain
 import re
+from pathlib import Path
 
 def extract_chain_data(structure, chain_id):
     """Extract residue names and numbering for a given chain."""
@@ -25,30 +26,50 @@ def check_sequence(orig_seq, pred_seq, tag):
 
 
 def rename_and_renumber(predicted_structure, target_chain_id, target_numbers):
-    """Rename chain and renumber residues to match target numbering."""
+    """Rename chain and renumber residues to match target numbering.
+    
+    Creates a new structure to avoid BioPython warnings about duplicate residue IDs.
+    """
     atom_counter = 1
+    
+    # Create new structure, model, and chain
+    new_structure = Structure.Structure("fixed")
+    new_model = Model.Model(0)
+    new_chain = Chain.Chain(target_chain_id)
+    new_structure.add(new_model)
+    new_model.add(new_chain)
+    
     for model in predicted_structure:
         chains = list(model.get_chains())
         if len(chains) != 1:
             raise ValueError("Predicted PDB must have exactly one chain.")
         chain = chains[0]
-        chain.id = target_chain_id
         residues = [res for res in chain if res.id[0] == ' ']
         if len(residues) != len(target_numbers):
             raise ValueError("Residue count mismatch after sequence check.")
+        
+        # Add residues with new numbering to the new chain
         for res, num in zip(residues, target_numbers):
             num_str = str(num).strip()
-            match = re.match(r'^(\d+)(\D*)$', num_str)
+            match = re.match(r'^(-?\d+)(\D*)$', num_str)
             if match:
                 res_num = int(match.group(1))
                 ins_code = match.group(2) if match.group(2) else ' '
             else:
                 raise ValueError(f"Cannot parse residue numbering: {num}")
-            # res.id = (res.id, res_num, ins_code)
-            res.id = (' ', res_num, ins_code)
-            for atom in res:
+            
+            # Create a copy of the residue with new ID
+            res_copy = res.copy()
+            res_copy.id = (' ', res_num, ins_code)
+            
+            # Renumber atoms
+            for atom in res_copy:
                 atom.serial_number = atom_counter
                 atom_counter += 1
+            
+            new_chain.add(res_copy)
+    
+    return new_structure
 
 
 def fix_pdb(original_pdb, predicted_pdb, chain_id, output_pdb):
@@ -71,10 +92,13 @@ def fix_pdb(original_pdb, predicted_pdb, chain_id, output_pdb):
     # Compare sequences
     check_sequence(orig_seq, pred_seq, predicted_pdb)
 
-    # Rename+renumber
-    rename_and_renumber(pred_structure, chain_id, orig_nums)
+    # Rename+renumber (returns a new structure)
+    fixed_structure = rename_and_renumber(pred_structure, chain_id, orig_nums)
 
     # Save updated PDB
+    output_dir = Path(output_pdb).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
     io = PDBIO()
-    io.set_structure(pred_structure)
+    io.set_structure(fixed_structure)
     io.save(output_pdb)
