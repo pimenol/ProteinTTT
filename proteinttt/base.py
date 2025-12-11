@@ -749,7 +749,11 @@ class TTTModule(torch.nn.Module, ABC):
             return metrics
 
         z_0 = self._fgr_anchor_representation
-        fgr_loss_delta = self._fgr_prev_loss - loss
+        
+        # Compute loss delta (only if both current and previous loss are available)
+        fgr_loss_delta = None
+        if loss is not None and self._fgr_prev_loss is not None:
+            fgr_loss_delta = self._fgr_prev_loss - loss
         
         cos_sim = torch.nn.functional.cosine_similarity(
             z_t.unsqueeze(0), z_0.unsqueeze(0)
@@ -758,11 +762,11 @@ class TTTModule(torch.nn.Module, ABC):
         fgr_drift_delta = fgr_drift - self._fgr_prev_drift
         
         fgr_ratio = None
-        if fgr_loss_delta is not None and fgr_drift_delta is not None and abs(fgr_drift_delta) > 1e-10:
+        if fgr_loss_delta is not None and abs(fgr_drift_delta) > 1e-10:
             fgr_ratio = fgr_loss_delta / fgr_drift_delta
             
         fgr_stop_drift = fgr_drift > self.ttt_cfg.fgr_drift_threshold
-        fgr_stop_ratio = fgr_ratio < self.ttt_cfg.fgr_ratio_threshold
+        fgr_stop_ratio = fgr_ratio is not None and fgr_ratio < self.ttt_cfg.fgr_ratio_threshold
 
         self._fgr_prev_loss = loss
         self._fgr_prev_drift = fgr_drift
