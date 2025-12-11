@@ -15,6 +15,9 @@ DEFAULT_ESMFOLD_TTT_CFG = TTTConfig(
     lr=4e-4, batch_size=4, ags=4, steps=30, lora_rank=8, lora_alpha=32.0
 )
 
+GRAD_CLIP_ESMFOLD_TTT_CFG = TTTConfig(
+    lr=0.002, batch_size=4, ags=4, steps=30, lora_rank=128, lora_alpha=256.0, gradient_clip=True, gradient_clip_max_norm=1.0
+)
 
 class ESMFoldTTT(TTTModule, ESMFold):
     ttt_default_cfg = DEFAULT_ESMFOLD_TTT_CFG
@@ -65,7 +68,27 @@ class ESMFoldTTT(TTTModule, ESMFold):
         return self.esm(batch)[
             "logits"
         ]  # [bs, seq_len] -> [bs, seq_len, vocab_size]
-    
+
+    def _ttt_get_representation(
+        self, x: torch.Tensor, **kwargs
+    ) -> torch.Tensor:
+        with torch.no_grad():
+            # Move input to the same device as the model
+            device = next(self.esm.parameters()).device
+            x = x.to(device)
+            
+            esm_output = self.esm(x, repr_layers=[self.esm.num_layers])
+            representations = esm_output["representations"][self.esm.num_layers]
+            non_special_tokens = self._ttt_get_non_special_tokens()
+            non_special_mask = torch.isin(
+                x[0], torch.tensor(non_special_tokens, device=device)
+            )
+            if non_special_mask.sum() > 0:
+                pooled = representations[0, non_special_mask].mean(dim=0)
+            else:
+                pooled = representations[0].mean(dim=0)
+        return pooled
+
     def ttt_reset(self) -> None:
         """Reset model and cleanup temporary files."""
         super().ttt_reset()
@@ -82,43 +105,49 @@ class ESMFoldTTT(TTTModule, ESMFold):
         all_log_probs: torch.Tensor,
         seq: str,
         msa_pth: Path,
+        x: T.Optional[torch.Tensor] = None,
         correct_pdb_path: T.Optional[Path] = None,
         **kwargs,
     ) -> tuple[dict, dict, T.Optional[float]]:
+        _, base_metrics, _ = super()._ttt_eval_step(
+            step=step,
+            loss=loss,
+            perplexity=perplexity,
+            all_log_probs=all_log_probs,
+            seq=seq,
+            msa_pth=msa_pth,
+            x=x,
+            **kwargs,
+        )
+
         # Predict structure
         with torch.no_grad():
             output = self.infer(seq, masking_pattern=None)
-            # original_chunk_size = self.trunk.chunk_size
-            # try:
-            #     self.set_chunk_size(512)
-            #     output = self.infer(seq, masking_pattern=None)
-            # finally:
-            #     self.set_chunk_size(original_chunk_size)
-        
+
         pdb_str = self.output_to_pdb(output)
         plddt = output["mean_plddt"].item()
 
-        # Only calculate expensive structural metrics if correct_pdb_path is provided
         tm_score = None
         lddt = None
         if correct_pdb_path is not None:
-            # Create or reuse temp file path to avoid overhead of creating new temp files each step
             if self._ttt_temp_pdb_path is None:
                 with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pdb') as tmp_file:
                     self._ttt_temp_pdb_path = Path(tmp_file.name)
             
-            # Write PDB string to temp file with buffering for better I/O performance
             pdb_str_to_write = pdb_str[0] if isinstance(pdb_str, list) else pdb_str
             with open(self._ttt_temp_pdb_path, 'w', buffering=8192) as f:
                 f.write(pdb_str_to_write)
             
-            # Calculate structural metrics
             tm_score = calculate_tm_score(self._ttt_temp_pdb_path, correct_pdb_path)
             lddt = lddt_score(correct_pdb_path, self._ttt_temp_pdb_path)
 
-        # Store predictions
         eval_step_preds = {"pdb": pdb_str}
-        eval_step_metric_dict = {"plddt": plddt, "tm_score": tm_score, "lddt": lddt}
+        eval_step_metric_dict = {
+            **base_metrics,
+            "plddt": plddt,
+            "tm_score": tm_score,
+            "lddt": lddt,
+        }
         confidence = plddt
 
         return eval_step_preds, eval_step_metric_dict, confidence
