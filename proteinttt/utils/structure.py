@@ -3,6 +3,36 @@ import numpy as np
 from pathlib import Path
 import Bio.PDB as bp
 import biotite.structure.io as bsio
+from proteinttt.utils.fix_pdb import fix_pdb
+
+import subprocess
+import os
+from pathlib import Path
+import numpy as np
+
+# Mapping of 3-letter amino acid codes to 1-letter codes
+AA3_TO_AA1 = {
+    "ALA": "A",
+    "CYS": "C",
+    "ASP": "D",
+    "GLU": "E",
+    "PHE": "F",
+    "GLY": "G",
+    "HIS": "H",
+    "ILE": "I",
+    "LYS": "K",
+    "LEU": "L",
+    "MET": "M",
+    "ASN": "N",
+    "PRO": "P",
+    "GLN": "Q",
+    "ARG": "R",
+    "SER": "S",
+    "THR": "T",
+    "VAL": "V",
+    "TRP": "W",
+    "TYR": "Y",
+}
 
 
 def calculate_tm_score(
@@ -11,8 +41,8 @@ def calculate_tm_score(
     chain_id=None,
     use_tmalign=False,
     verbose=False,
-    tmscore_path=None,
-    tmalign_path=None,
+    tmscore_path="/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/TMalign",
+    tmalign_path="/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/TMalign.cpp"
 ):
     """Calculate TM-score between predicted and reference protein structures.
 
@@ -160,3 +190,85 @@ def calculate_plddt(pdb_file_path):
     struct = bsio.load_structure(pdb_file_path, extra_fields=["b_factor"])
     pLDDT = float(np.asarray(struct.b_factor, dtype=float).mean())
     return pLDDT
+
+
+def calculate_metrics(true_path, pred_path, chain_id=None, path_to_fix_pdb=None):
+    if path_to_fix_pdb is not None and chain_id is not None:
+        fix_pdb(true_path, pred_path, chain_id, path_to_fix_pdb)
+
+        tm_score = calculate_tm_score(path_to_fix_pdb, true_path)
+        lddt = lddt_score(true_path, path_to_fix_pdb)
+        pLDDT = calculate_plddt(path_to_fix_pdb)
+    else:
+        tm_score = calculate_tm_score(pred_path, true_path)
+        lddt = lddt_score(true_path, pred_path)
+        pLDDT = calculate_plddt(pred_path)
+
+    return tm_score, lddt, pLDDT
+
+def get_sequence_from_pdb(pdb_path: str) -> str:
+    """
+    Parse a PDB file and return the amino acid sequence as a one-letter code string.
+    Assumes ATOM records only. Asserts there is exactly one chain in the file.
+
+    Sequence is built from CA atoms in order of appearance.
+
+    Args:
+        pdb_path: Path to PDB file
+
+    Returns:
+        str: Amino acid sequence as a one-letter code string
+
+    Raises:
+        FileNotFoundError: If PDB file not found
+        AssertionError: If more than one chain is found in the PDB file
+        ValueError: If unknown or unsupported residue name is found in the PDB file
+    """
+    if not os.path.isfile(pdb_path):
+        raise FileNotFoundError(f"PDB file not found: {pdb_path}")
+
+    chains = set()
+    residues = []  # (resSeq, iCode, resName)
+    seen_residues = set()  # to avoid duplicates
+
+    with open(pdb_path, "r") as f:
+        for line in f:
+            if not line.startswith("ATOM  "):
+                continue
+
+            chain_id = line[21]
+            chains.add(chain_id)
+
+            res_name = line[17:20].strip()
+            res_seq = line[22:26].strip()
+            i_code = line[26].strip()  # insertion code
+            atom_name = line[12:16].strip()
+
+            # Use only CA atoms to define sequence order
+            if atom_name != "CA":
+                continue
+
+            key = (chain_id, res_seq, i_code)
+            if key in seen_residues:
+                continue
+            seen_residues.add(key)
+            residues.append((res_name, res_seq, i_code))
+
+    # Assert only one chain
+    if len(chains) == 0:
+        raise ValueError(f"No ATOM records found in {pdb_path}")
+    if len(chains) != 1:
+        raise AssertionError(
+            f"Expected exactly one chain, found {len(chains)} in {pdb_path}: {chains}"
+        )
+
+    # Convert to one-letter sequence
+    seq = []
+    for res_name, res_seq, i_code in residues:
+        if res_name not in AA3_TO_AA1:
+            raise ValueError(
+                f"Unknown or unsupported residue name '{res_name}' at {res_seq}{i_code} in {pdb_path}"
+            )
+        seq.append(AA3_TO_AA1[res_name])
+
+    return "".join(seq)
