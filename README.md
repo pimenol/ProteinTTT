@@ -67,6 +67,19 @@ model.ttt_reset()
 # =====================================
 ```
 
+The package currently implements ProteinTTT for the following protein language models:
+
+| Model name       | Reference                                                                                  |
+|------------------|-------------------------------------------------------------------------------------------|
+| DPLM2 Bit-based  | [Hsieh et al., 2025](https://arxiv.org/abs/2504.11454)                          |
+| ProSST           | [Li et al., 2024](https://www.biorxiv.org/content/10.1101/2024.04.15.589672v3)                          |
+| SaProt             | [Su et al., 2023](https://www.biorxiv.org/content/10.1101/2023.10.01.560349v5)                          |
+| ESMFold          | [Lin et al., 2023](https://doi.org/10.1126/science.ade2574)                          |
+| ESM2             | [Lin et al., 2023](https://doi.org/10.1126/science.ade2574)                          |
+| ProGen2          | [Nijkamp et al., 2023](https://www.cell.com/cell-systems/fulltext/S2405-4712(23)00272-7)         |
+| MSA Transformer  | [Rao et al., 2021](https://doi.org/10.1101/2021.02.12.430858)                          |
+
+
 See `notebooks/demo.ipynb` for more usage examples.
 
 ## Implementing ProteinTTT for your custom model
