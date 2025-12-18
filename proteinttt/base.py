@@ -115,7 +115,7 @@ class TTTConfig:
     fgr_warmup_steps: int = 5
     fgr_patience: int = 3
     fgr_use_cumulative: bool = True
-    fgr_min_drift_delta: float = 1e-6
+    fgr_min_drift_delta: float = 0
 
     @classmethod
     def from_yaml(cls, yaml_path: str | Path) -> "TTTConfig":
@@ -726,6 +726,7 @@ class TTTModule(torch.nn.Module, ABC):
         self,
         step: int,
         loss: T.Optional[float],
+        perplexity: T.Optional[float],
         x: torch.Tensor,
         **kwargs,
     ) -> dict[str, T.Optional[float]]:
@@ -743,6 +744,7 @@ class TTTModule(torch.nn.Module, ABC):
         Args:
             step: Current training step
             loss: Training loss at current step
+            perplexity: Perplexity at current step
             x: Input sequence tensor [1, sequence_length]
 
         Returns:
@@ -779,7 +781,7 @@ class TTTModule(torch.nn.Module, ABC):
 
         if step == 0:
             self._fgr_anchor_representation = z_t.clone()
-            self._fgr_prev_loss = loss
+            self._fgr_prev_loss = perplexity
             self._fgr_prev_drift = 0.0
             self._fgr_initial_loss = None
             self._fgr_ema_loss = None
@@ -788,14 +790,14 @@ class TTTModule(torch.nn.Module, ABC):
             self._fgr_negative_ratio_count = 0
             
             metrics["fgr_drift"] = 0.0
-            metrics["fgr_ema_loss"] = loss
+            metrics["fgr_ema_loss"] = perplexity
             return metrics
 
         z_0 = self._fgr_anchor_representation
         
         # Capture initial loss at first step with valid loss (for cumulative ratio)
-        if self._fgr_initial_loss is None and loss is not None:
-            self._fgr_initial_loss = loss
+        if self._fgr_initial_loss is None and perplexity is not None:
+            self._fgr_initial_loss = perplexity
         
         cos_sim = torch.nn.functional.cosine_similarity(
             z_t.unsqueeze(0), z_0.unsqueeze(0)
@@ -805,15 +807,15 @@ class TTTModule(torch.nn.Module, ABC):
         
         # Compute loss delta
         fgr_loss_delta = None
-        if loss is not None and self._fgr_prev_loss is not None:
-            fgr_loss_delta = self._fgr_prev_loss - loss
+        if perplexity is not None and self._fgr_prev_loss is not None:
+            fgr_loss_delta = self._fgr_prev_loss - perplexity
         
         # Update EMA smoothed loss
-        if loss is not None:
+        if perplexity is not None:
             if self._fgr_ema_loss is None:
-                self._fgr_ema_loss = loss
+                self._fgr_ema_loss = perplexity
             else:
-                self._fgr_ema_loss = self.ttt_cfg.fgr_ema_decay * self._fgr_ema_loss + (1 - self.ttt_cfg.fgr_ema_decay) * loss
+                self._fgr_ema_loss = self.ttt_cfg.fgr_ema_decay * self._fgr_ema_loss + (1 - self.ttt_cfg.fgr_ema_decay) * perplexity
         
         # # Update EMA smoothed drift rate
         # abs_drift_delta = abs(fgr_drift_delta)
@@ -829,8 +831,8 @@ class TTTModule(torch.nn.Module, ABC):
         
         # Compute cumulative ratio
         fgr_ratio_cumulative = None
-        if loss is not None and self._fgr_initial_loss is not None:
-            self._fgr_cumulative_loss_gain = self._fgr_initial_loss - loss
+        if perplexity is not None and self._fgr_initial_loss is not None:
+            self._fgr_cumulative_loss_gain = self._fgr_initial_loss - perplexity
             if fgr_drift > self.ttt_cfg.fgr_min_drift_delta:
                 fgr_ratio_cumulative = self._fgr_cumulative_loss_gain / fgr_drift
         
@@ -858,7 +860,7 @@ class TTTModule(torch.nn.Module, ABC):
         #     and self._fgr_negative_ratio_count >= self.ttt_cfg.fgr_patience
         # )
     
-        self._fgr_prev_loss = loss
+        self._fgr_prev_loss = perplexity
         self._fgr_prev_drift = fgr_drift
 
         metrics["fgr_loss_delta"] = fgr_loss_delta
@@ -1494,6 +1496,7 @@ class TTTModule(torch.nn.Module, ABC):
             fgr_metrics = self._ttt_compute_fgr_metrics(
                 step=step,
                 loss=loss,
+                perplexity=perplexity,
                 x=x,
                 **kwargs,
             )
