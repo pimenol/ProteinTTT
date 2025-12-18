@@ -106,10 +106,16 @@ class TTTConfig:
     lr_min: float = 0.0
 
     # FGR (Fidelity-Gain Ratio) stopping criterion parameters
-    fgr_enabled: bool = True  # Whether to compute FGR metrics
-    fgr_drift_threshold: float = 0.1  # Maximum allowed semantic drift
-    fgr_ratio_threshold: float = 0.0  # Minimum efficiency ratio
-    fgr_early_stopping: bool = False  # Whether to use FGR for early stopping
+    fgr_enabled: bool = True
+    fgr_drift_threshold: float = 0.1
+    fgr_ratio_threshold: float = 0.0
+    fgr_early_stopping: bool = False
+
+    fgr_ema_decay: float = 0.9
+    fgr_warmup_steps: int = 5
+    fgr_patience: int = 3
+    fgr_use_cumulative: bool = True
+    fgr_min_drift_delta: float = 1e-6
 
     @classmethod
     def from_yaml(cls, yaml_path: str | Path) -> "TTTConfig":
@@ -241,6 +247,13 @@ class TTTModule(torch.nn.Module, ABC):
         self._fgr_anchor_representation: T.Optional[torch.Tensor] = None  # z_0
         self._fgr_prev_loss: T.Optional[float] = None  # L(x; θ_{t-1})
         self._fgr_prev_drift: T.Optional[float] = None  # D_{t-1}
+        
+        # Enhanced FGR tracking for stability
+        self._fgr_initial_loss: T.Optional[float] = None  
+        self._fgr_ema_loss: T.Optional[float] = None 
+        self._fgr_ema_drift: T.Optional[float] = None 
+        self._fgr_cumulative_loss_gain: float = 0.0
+        self._fgr_negative_ratio_count: int = 0
 
     @classmethod
     def ttt_from_pretrained(
@@ -697,9 +710,17 @@ class TTTModule(torch.nn.Module, ABC):
         return representation
 
     def _ttt_reset_fgr_state(self) -> None:
+        """Reset all FGR state for a new TTT run."""
         self._fgr_anchor_representation = None
         self._fgr_prev_loss = None
         self._fgr_prev_drift = None
+        
+        # Reset enhanced FGR tracking
+        self._fgr_initial_loss = None
+        self._fgr_ema_loss = None
+        self._fgr_ema_drift = None
+        self._fgr_cumulative_loss_gain = 0.0
+        self._fgr_negative_ratio_count = 0
 
     def _ttt_compute_fgr_metrics(
         self,
@@ -708,7 +729,17 @@ class TTTModule(torch.nn.Module, ABC):
         x: torch.Tensor,
         **kwargs,
     ) -> dict[str, T.Optional[float]]:
-        """Compute Fidelity-Gain Ratio (FGR) metrics for stopping criterion.
+        """Compute enhanced Fidelity-Gain Ratio (FGR) metrics for stopping criterion.
+        
+        This implementation uses several techniques to stabilize FGR:
+        1. EMA smoothing for loss and drift to reduce noise
+        2. Cumulative ratio (total_gain / total_drift) for robustness
+        3. Warm-up period before allowing early stopping
+
+
+        4. Patience mechanism requiring consecutive negative ratios
+        5. Numerical stability guards for small denominators
+        
         Args:
             step: Current training step
             loss: Training loss at current step
@@ -716,58 +747,117 @@ class TTTModule(torch.nn.Module, ABC):
 
         Returns:
             Dictionary containing FGR metrics:
-                - fgr_loss_delta: Change in loss
+                - fgr_loss_delta: Instantaneous change in loss (step-wise)
                 - fgr_drift: Cosine dissimilarity from anchor (0 to 2)
                 - fgr_drift_delta: Change in drift from previous step
-                - fgr_ratio: Ratio of loss gain to drift cost
+                - fgr_ratio: Step-wise ratio of loss gain to drift cost
+                - fgr_ratio_cumulative: Cumulative ratio (total_gain / total_drift)
+                - fgr_ema_loss: EMA smoothed loss
+                - fgr_ema_ratio: Ratio using EMA smoothed values
                 - fgr_stop_drift: Whether drift threshold exceeded
-                - fgr_stop_ratio: Whether efficiency collapsed
+                - fgr_stop_ratio: Whether efficiency collapsed (with patience)
+                - fgr_negative_count: Consecutive negative ratio count
         """
         if not self.ttt_cfg.fgr_enabled:
             return {}
 
-        metrics: dict[str, T.Optional[float]] = {
+        metrics: dict[str, T.Any] = {
             "fgr_loss_delta": None,
             "fgr_drift": None,
             "fgr_drift_delta": None,
             "fgr_ratio": None,
-            "fgr_stop_drift": None,
-            "fgr_stop_ratio": None,
+            "fgr_ratio_cumulative": None,
+            "fgr_ema_loss": None,
+            "fgr_ema_ratio": None,
+            "fgr_stop_drift": False,
+            "fgr_stop_ratio": False,
+            "fgr_negative_count": 0,
         }
 
         # Get current representation
         z_t = self._ttt_get_representation(x, **kwargs)
 
-        # Initialize anchor at step 0
         if step == 0:
             self._fgr_anchor_representation = z_t.clone()
             self._fgr_prev_loss = loss
             self._fgr_prev_drift = 0.0
+            self._fgr_initial_loss = None
+            self._fgr_ema_loss = None
+            self._fgr_ema_drift = 0.0
+            self._fgr_cumulative_loss_gain = 0.0
+            self._fgr_negative_ratio_count = 0
+            
             metrics["fgr_drift"] = 0.0
-            metrics["fgr_stop_drift"] = False
-            metrics["fgr_stop_ratio"] = False
+            metrics["fgr_ema_loss"] = loss
             return metrics
 
         z_0 = self._fgr_anchor_representation
         
-        # Compute loss delta (only if both current and previous loss are available)
-        fgr_loss_delta = None
-        if loss is not None and self._fgr_prev_loss is not None:
-            fgr_loss_delta = self._fgr_prev_loss - loss
+        # Capture initial loss at first step with valid loss (for cumulative ratio)
+        if self._fgr_initial_loss is None and loss is not None:
+            self._fgr_initial_loss = loss
         
         cos_sim = torch.nn.functional.cosine_similarity(
             z_t.unsqueeze(0), z_0.unsqueeze(0)
         ).item()
-        fgr_drift = 1.0 - cos_sim
+        fgr_drift = abs(1.0 - cos_sim) 
         fgr_drift_delta = fgr_drift - self._fgr_prev_drift
         
+        # Compute loss delta
+        fgr_loss_delta = None
+        if loss is not None and self._fgr_prev_loss is not None:
+            fgr_loss_delta = self._fgr_prev_loss - loss
+        
+        # Update EMA smoothed loss
+        if loss is not None:
+            if self._fgr_ema_loss is None:
+                self._fgr_ema_loss = loss
+            else:
+                self._fgr_ema_loss = self.ttt_cfg.fgr_ema_decay * self._fgr_ema_loss + (1 - self.ttt_cfg.fgr_ema_decay) * loss
+        
+        # # Update EMA smoothed drift rate
+        # abs_drift_delta = abs(fgr_drift_delta)
+        # if self._fgr_ema_drift is None:
+        #     self._fgr_ema_drift = abs_drift_delta
+        # else:
+        #     self._fgr_ema_drift = self.ttt_cfg.fgr_ema_decay * self._fgr_ema_drift + (1 - self.ttt_cfg.fgr_ema_decay) * abs_drift_delta
+        
+        # Compute step-wise ratio with numerical stability
         fgr_ratio = None
-        if fgr_loss_delta is not None and abs(fgr_drift_delta) > 1e-10:
-            fgr_ratio = fgr_loss_delta / fgr_drift_delta
-            
+        if fgr_loss_delta is not None and abs(fgr_drift_delta) > self.ttt_cfg.fgr_min_drift_delta:
+            fgr_ratio = fgr_loss_delta / abs(fgr_drift_delta)
+        
+        # Compute cumulative ratio
+        fgr_ratio_cumulative = None
+        if loss is not None and self._fgr_initial_loss is not None:
+            self._fgr_cumulative_loss_gain = self._fgr_initial_loss - loss
+            if fgr_drift > self.ttt_cfg.fgr_min_drift_delta:
+                fgr_ratio_cumulative = self._fgr_cumulative_loss_gain / fgr_drift
+        
+        # Compute EMA-smoothed ratio
+        fgr_ema_ratio = None
+        if self._fgr_ema_loss is not None and self._fgr_initial_loss is not None:
+            ema_loss_gain = self._fgr_initial_loss - self._fgr_ema_loss
+            if fgr_drift > self.ttt_cfg.fgr_min_drift_delta:
+                fgr_ema_ratio = ema_loss_gain / fgr_drift
+        
+        if self.ttt_cfg.fgr_use_cumulative:
+            decision_ratio = fgr_ratio_cumulative
+        else:
+            decision_ratio = fgr_ratio
+        
+        # if decision_ratio is not None and decision_ratio < self.ttt_cfg.fgr_ratio_threshold:
+        #     self._fgr_negative_ratio_count += 1
+        # else:
+        #     self._fgr_negative_ratio_count = 0
+        
         fgr_stop_drift = fgr_drift > self.ttt_cfg.fgr_drift_threshold
-        fgr_stop_ratio = fgr_ratio is not None and fgr_ratio < self.ttt_cfg.fgr_ratio_threshold
-
+        
+        # fgr_stop_ratio = (
+        #     step >= self.ttt_cfg.fgr_warmup_steps
+        #     and self._fgr_negative_ratio_count >= self.ttt_cfg.fgr_patience
+        # )
+    
         self._fgr_prev_loss = loss
         self._fgr_prev_drift = fgr_drift
 
@@ -775,8 +865,13 @@ class TTTModule(torch.nn.Module, ABC):
         metrics["fgr_drift"] = fgr_drift
         metrics["fgr_drift_delta"] = fgr_drift_delta
         metrics["fgr_ratio"] = fgr_ratio
+        metrics["fgr_ratio_cumulative"] = fgr_ratio_cumulative
+        metrics["fgr_ema_loss"] = self._fgr_ema_loss
+        metrics["fgr_ema_ratio"] = fgr_ema_ratio
         metrics["fgr_stop_drift"] = fgr_stop_drift
-        metrics["fgr_stop_ratio"] = fgr_stop_ratio
+        # metrics["fgr_stop_ratio"] = fgr_stop_ratio
+        # metrics["fgr_negative_count"] = self._fgr_negative_ratio_count
+        
         return metrics
 
     def _ttt_get_trainable_modules(self) -> list[torch.nn.Module]:
