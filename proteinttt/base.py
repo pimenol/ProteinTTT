@@ -83,7 +83,7 @@ class TTTConfig:
     msa_cache_dir: Path = Path.home() / ".cache" / "ttt"
     score_seq_kind: T.Optional[
         str
-    ] = None  # T.Optional[T.Literal['pseudo_perplexity', 'gordon2024', 'none']] = None
+    ] = None  # T.Optional[T.Literal['pseudo_perplexity', 'scaled_pseudo_perplexity', 'gordon2024', 'none']] = None
     score_seq_steps_list: T.Any = (
         None  # T.Optional[int | list[int]]. None to use all steps
     )
@@ -1310,6 +1310,10 @@ class TTTModule(torch.nn.Module, ABC):
             all_log_probs, perplexity = self._ttt_score_seq_pseudo_perplexity(
                 x, **kwargs
             )
+        elif self.ttt_cfg.score_seq_kind == "scaled_pseudo_perplexity":
+            all_log_probs, perplexity = self._ttt_score_seq_scaled_pseudo_perplexity(
+                x, **kwargs
+            )
         elif self.ttt_cfg.score_seq_kind == "gordon2024":
             all_log_probs, perplexity = self._ttt_score_seq_gordon2024(
                 x, **kwargs
@@ -1395,6 +1399,28 @@ class TTTModule(torch.nn.Module, ABC):
         perplexity = torch.exp(-torch.mean(torch.tensor(wt_log_probs))).item()
 
         return all_log_probs, perplexity
+
+    def _ttt_score_seq_scaled_pseudo_perplexity(
+        self, x: torch.Tensor, **kwargs
+    ) -> tuple[list[torch.Tensor], float]:
+        """Score sequence using scaled pseudo-perplexity.
+
+        Calculates pseudo-perplexity and scales it to a reliability score between 0 and 1
+        using the formula: (20 - PPPL(wildtype)) / 19
+
+        Args:
+            x: Input sequence tensor [1, sequence_length]
+            **kwargs: Additional arguments passed to model forward pass
+
+        Returns:
+            tuple containing:
+                - all_log_probs: Log probabilities for each token in the sequence when masked
+                - scaled_perplexity: Scaled pseudo-perplexity (reliability score between 0 and 1)
+        """
+        all_log_probs, perplexity = self._ttt_score_seq_pseudo_perplexity(x, **kwargs)
+        scaled_perplexity = (20.0 - perplexity) / 19.0
+        scaled_perplexity = max(0.0, scaled_perplexity)
+        return all_log_probs, scaled_perplexity
 
     def _ttt_score_seq_gordon2024(
         self, x: torch.Tensor, **kwargs
