@@ -6,7 +6,6 @@ import numpy as np
 import time
 import esm
 import biotite.structure.io as bsio
-import proteinttt
 from proteinttt.models.esmfold import ESMFoldTTT, DEFAULT_ESMFOLD_TTT_CFG
 from proteinttt.utils.structure import calculate_tm_score, lddt_score
 import torch

@@ -47,14 +47,19 @@ def main(lr, ags, grad_clip_max_norm, lora_rank, lora_alpha):
 
     base_path = Path("/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/data/bfvd/")
     JOB_SUFFIX = os.getenv("SLURM_JOB_ID", str(uuid.uuid4()))
+    CONTINUE_CLACULATING = True
 
-    experiment_pattern = f'experement_{lr}_{ags}_{grad_clip_max_norm}_{lora_rank}_{lora_alpha}_1bdvjksbdvr_*'
-    matching_dirs = list((base_path / 'experements_msa').glob(experiment_pattern))
-    if matching_dirs:
-        print(f"Experiment {lr}_{ags}_{grad_clip_max_norm}_{lora_rank}_{lora_alpha} already exists")
-        OUTPUTS_PATH = matching_dirs[0]
+    if CONTINUE_CLACULATING:
+        experiment_pattern = f'experement_{lr}_{ags}_{lora_rank}_{lora_alpha}_100_nograd_*'
+        matching_dirs = list((base_path / 'experements_msa').glob(experiment_pattern))
+        if matching_dirs:
+            print(f"Experiment {lr}_{ags}_{lora_rank}_{lora_alpha} already exists: {matching_dirs[0]}")
+            OUTPUTS_PATH = matching_dirs[0]
+        else: 
+            OUTPUTS_PATH = base_path / 'experements_msa' /f'experement_{lr}_{ags}_{lora_rank}_{lora_alpha}_100_nograd_{JOB_SUFFIX}'
+            print(f"Experiment {lr}_{ags}_{lora_rank}_{lora_alpha} does not exist, creating new one: {OUTPUTS_PATH}")
     else:
-        OUTPUTS_PATH = base_path / 'experements_msa' /f'experement_{lr}_{ags}_{grad_clip_max_norm}_{lora_rank}_{lora_alpha}_100_steps_nom_{JOB_SUFFIX}'
+        OUTPUTS_PATH = base_path / 'experements_msa' /f'experement_{lr}_{ags}_{lora_rank}_{lora_alpha}_100_nograd_{JOB_SUFFIX}'
         OUTPUTS_PATH.mkdir(parents=True, exist_ok=True)
 
     # Configure logging
@@ -96,7 +101,7 @@ def main(lr, ags, grad_clip_max_norm, lora_rank, lora_alpha):
     ttt_cfg.lr = lr
     ttt_cfg.ags = ags
     ttt_cfg.msa = True
-    ttt_cfg.gradient_clip = True
+    ttt_cfg.gradient_clip = False
     ttt_cfg.gradient_clip_max_norm = grad_clip_max_norm
     ttt_cfg.lora_rank = lora_rank
     ttt_cfg.lora_alpha = lora_alpha

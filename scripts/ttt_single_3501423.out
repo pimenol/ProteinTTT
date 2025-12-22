@@ -1,0 +1,38 @@
+Loading ESMFold model...
+Using device: cuda
+Sequence: MTRDWFNQICEEIKYQEKPIEISKNGHEPVSLRRLFKESFSCLVEERWIWDLYYRPLRMREFWDESRAEKYFYATTFSVFILKYSYGSDISTTSTRHLHRHTVLTCYLDSIVDMGWLSWAKQFGMAVFGLIPDIPPFDPNQPVGFRSSIEEDFPRLRLLAEGPHKMEIMKSLLEAAAVEKTRDSATSFQDIARYRMESNLVCIRPFIPAMGDLLQPLAMMYSFFDDAMDVIEDVDAGQPSYLTNNEDIRRGGNIARAAMSELNSLSKVDWSWLAQAAILLSEVNAMLQISLSINEYNNIENIGKHLFVRIAVLFFIILQ
+Length: 319
+Running TTT...
+2025-12-22 16:07:05,785 | INFO | step: 0, accumulated_step: 0, loss: None, perplexity: None, ttt_step_time: 0.00000, score_seq_time: 0.00000, eval_step_time: 8.02445, lr: 0.00200, plddt: 72.30360, tm_score: None, lddt: None
+2025-12-22 16:07:13,251 | INFO | step: 1, accumulated_step: 4, loss: 2.59570, perplexity: None, ttt_step_time: 0.94528, score_seq_time: 0.00000, eval_step_time: 6.43815, lr: 0.00200, plddt: 74.01615, tm_score: None, lddt: None
+2025-12-22 16:07:20,568 | INFO | step: 2, accumulated_step: 8, loss: 2.55469, perplexity: None, ttt_step_time: 0.88258, score_seq_time: 0.00000, eval_step_time: 6.43370, lr: 0.00200, plddt: 73.41502, tm_score: None, lddt: None
+2025-12-22 16:07:27,884 | INFO | step: 3, accumulated_step: 12, loss: 2.63672, perplexity: None, ttt_step_time: 0.88142, score_seq_time: 0.00000, eval_step_time: 6.43427, lr: 0.00200, plddt: 71.96169, tm_score: None, lddt: None
+2025-12-22 16:07:35,200 | INFO | step: 4, accumulated_step: 16, loss: 2.51758, perplexity: None, ttt_step_time: 0.88201, score_seq_time: 0.00000, eval_step_time: 6.43404, lr: 0.00200, plddt: 72.35004, tm_score: None, lddt: None
+2025-12-22 16:07:42,516 | INFO | step: 5, accumulated_step: 20, loss: 2.50781, perplexity: None, ttt_step_time: 0.88167, score_seq_time: 0.00000, eval_step_time: 6.43442, lr: 0.00200, plddt: 71.68156, tm_score: None, lddt: None
+2025-12-22 16:07:49,833 | INFO | step: 6, accumulated_step: 24, loss: 2.52734, perplexity: None, ttt_step_time: 0.88145, score_seq_time: 0.00000, eval_step_time: 6.43482, lr: 0.00200, plddt: 71.78316, tm_score: None, lddt: None
+2025-12-22 16:07:57,149 | INFO | step: 7, accumulated_step: 28, loss: 2.44141, perplexity: None, ttt_step_time: 0.88213, score_seq_time: 0.00000, eval_step_time: 6.43404, lr: 0.00200, plddt: 71.88815, tm_score: None, lddt: None
+2025-12-22 16:08:04,466 | INFO | step: 8, accumulated_step: 32, loss: 2.44922, perplexity: None, ttt_step_time: 0.88140, score_seq_time: 0.00000, eval_step_time: 6.43481, lr: 0.00200, plddt: 71.98409, tm_score: None, lddt: None
+2025-12-22 16:08:11,782 | INFO | step: 9, accumulated_step: 36, loss: 2.42188, perplexity: None, ttt_step_time: 0.88220, score_seq_time: 0.00000, eval_step_time: 6.43373, lr: 0.00200, plddt: 72.10408, tm_score: None, lddt: None
+2025-12-22 16:08:19,098 | INFO | step: 10, accumulated_step: 40, loss: 2.34570, perplexity: None, ttt_step_time: 0.88227, score_seq_time: 0.00000, eval_step_time: 6.43313, lr: 0.00200, plddt: 72.33079, tm_score: None, lddt: None
+2025-12-22 16:08:26,415 | INFO | step: 11, accumulated_step: 44, loss: 2.42383, perplexity: None, ttt_step_time: 0.88210, score_seq_time: 0.00000, eval_step_time: 6.43464, lr: 0.00200, plddt: 73.84132, tm_score: None, lddt: None
+2025-12-22 16:08:33,732 | INFO | step: 12, accumulated_step: 48, loss: 2.37500, perplexity: None, ttt_step_time: 0.88215, score_seq_time: 0.00000, eval_step_time: 6.43480, lr: 0.00200, plddt: 73.99362, tm_score: None, lddt: None
+2025-12-22 16:08:41,113 | INFO | step: 13, accumulated_step: 52, loss: 2.31055, perplexity: None, ttt_step_time: 0.88291, score_seq_time: 0.00000, eval_step_time: 6.43367, lr: 0.00200, plddt: 74.10375, tm_score: None, lddt: None
+2025-12-22 16:08:48,427 | INFO | step: 14, accumulated_step: 56, loss: 2.19141, perplexity: None, ttt_step_time: 0.88047, score_seq_time: 0.00000, eval_step_time: 6.43265, lr: 0.00200, plddt: 73.80739, tm_score: None, lddt: None
+2025-12-22 16:08:55,740 | INFO | step: 15, accumulated_step: 60, loss: 2.25000, perplexity: None, ttt_step_time: 0.88159, score_seq_time: 0.00000, eval_step_time: 6.43134, lr: 0.00200, plddt: 73.70653, tm_score: None, lddt: None
+2025-12-22 16:09:03,053 | INFO | step: 16, accumulated_step: 64, loss: 2.29297, perplexity: None, ttt_step_time: 0.88124, score_seq_time: 0.00000, eval_step_time: 6.43232, lr: 0.00200, plddt: 72.39370, tm_score: None, lddt: None
+2025-12-22 16:09:10,366 | INFO | step: 17, accumulated_step: 68, loss: 2.20312, perplexity: None, ttt_step_time: 0.88071, score_seq_time: 0.00000, eval_step_time: 6.43188, lr: 0.00200, plddt: 72.65259, tm_score: None, lddt: None
+2025-12-22 16:09:17,678 | INFO | step: 18, accumulated_step: 72, loss: 2.20703, perplexity: None, ttt_step_time: 0.88037, score_seq_time: 0.00000, eval_step_time: 6.43145, lr: 0.00200, plddt: 72.69212, tm_score: None, lddt: None
+2025-12-22 16:09:24,990 | INFO | step: 19, accumulated_step: 76, loss: 2.21875, perplexity: None, ttt_step_time: 0.88038, score_seq_time: 0.00000, eval_step_time: 6.43121, lr: 0.00200, plddt: 73.21770, tm_score: None, lddt: None
+2025-12-22 16:09:32,302 | INFO | step: 20, accumulated_step: 80, loss: 2.14258, perplexity: None, ttt_step_time: 0.88029, score_seq_time: 0.00000, eval_step_time: 6.43102, lr: 0.00200, plddt: 72.50707, tm_score: None, lddt: None
+2025-12-22 16:09:39,615 | INFO | step: 21, accumulated_step: 84, loss: 2.07617, perplexity: None, ttt_step_time: 0.88092, score_seq_time: 0.00000, eval_step_time: 6.43211, lr: 0.00200, plddt: 71.69572, tm_score: None, lddt: None
+2025-12-22 16:09:46,929 | INFO | step: 22, accumulated_step: 88, loss: 2.09766, perplexity: None, ttt_step_time: 0.88067, score_seq_time: 0.00000, eval_step_time: 6.43295, lr: 0.00200, plddt: 72.66907, tm_score: None, lddt: None
+2025-12-22 16:09:54,242 | INFO | step: 23, accumulated_step: 92, loss: 2.05273, perplexity: None, ttt_step_time: 0.88125, score_seq_time: 0.00000, eval_step_time: 6.43163, lr: 0.00200, plddt: 72.46061, tm_score: None, lddt: None
+2025-12-22 16:10:01,554 | INFO | step: 24, accumulated_step: 96, loss: 2.03711, perplexity: None, ttt_step_time: 0.88027, score_seq_time: 0.00000, eval_step_time: 6.43126, lr: 0.00200, plddt: 72.13084, tm_score: None, lddt: None
+2025-12-22 16:10:08,866 | INFO | step: 25, accumulated_step: 100, loss: 1.90430, perplexity: None, ttt_step_time: 0.88047, score_seq_time: 0.00000, eval_step_time: 6.43156, lr: 0.00200, plddt: 70.93520, tm_score: None, lddt: None
+2025-12-22 16:10:16,201 | INFO | step: 26, accumulated_step: 104, loss: 1.91113, perplexity: None, ttt_step_time: 0.88055, score_seq_time: 0.00000, eval_step_time: 6.43202, lr: 0.00200, plddt: 72.38525, tm_score: None, lddt: None
+2025-12-22 16:10:23,514 | INFO | step: 27, accumulated_step: 108, loss: 1.93262, perplexity: None, ttt_step_time: 0.88051, score_seq_time: 0.00000, eval_step_time: 6.43214, lr: 0.00200, plddt: 71.89567, tm_score: None, lddt: None
+2025-12-22 16:10:30,827 | INFO | step: 28, accumulated_step: 112, loss: 1.88867, perplexity: None, ttt_step_time: 0.88127, score_seq_time: 0.00000, eval_step_time: 6.43182, lr: 0.00200, plddt: 73.75524, tm_score: None, lddt: None
+2025-12-22 16:10:38,325 | INFO | step: 29, accumulated_step: 116, loss: 1.66504, perplexity: None, ttt_step_time: 0.88062, score_seq_time: 0.00000, eval_step_time: 6.43149, lr: 0.00200, plddt: 74.29269, tm_score: None, lddt: None
+2025-12-22 16:10:45,640 | INFO | step: 30, accumulated_step: 120, loss: 1.81543, perplexity: None, ttt_step_time: 0.88067, score_seq_time: 0.00000, eval_step_time: 6.43355, lr: 0.00200, plddt: 73.76209, tm_score: None, lddt: None
+Saved: /scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/scripts/ttt_single.csv
+Job completed at Mon Dec 22 16:10:54 CET 2025
