@@ -6,7 +6,7 @@ import numpy as np
 import time
 import esm
 import biotite.structure.io as bsio
-from proteinttt.models.esmfold import ESMFoldTTT, DEFAULT_ESMFOLD_TTT_CFG
+from proteinttt.models.esmfold import ESMFoldTTT, DEFAULT_ESMFOLD_TTT_CFG, GRAD_CLIP_ESMFOLD_TTT_CFG
 from proteinttt.utils.structure import calculate_tm_score, lddt_score
 import torch
 import argparse
@@ -15,6 +15,11 @@ import uuid
 import traceback
 from proteinttt.utils.plots import plot_mean_scores_vs_step
 from proteinttt.utils.fix_pdb import fix_pdb
+import logging
+
+USE_MSA = False
+USE_GRADIENT_CLIP = False
+USE_TRUE_PDB = False
 
 
 # def check_model_weights(model):
@@ -49,14 +54,12 @@ def set_dynamic_chunk_size(model, sequence_length):
     return chunk_size
 
 
-def main():
+def main(df_path):
 
-    USE_MSA = False
-
-    base_path = Path("/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/data/cameo")
+    base_path = Path(df_path)
     JOB_SUFFIX = os.getenv("SLURM_JOB_ID", str(uuid.uuid4()))
 
-    OUTPUTS_PATH =  (base_path / 'cameo_msa' if USE_MSA else base_path)
+    OUTPUTS_PATH =  base_path
 
     ESM_TTT_DIR = OUTPUTS_PATH / 'predicted_structures' / 'ESMFold_ProteinTTT'
     ESM_DIR = OUTPUTS_PATH / 'predicted_structures' / 'ESMFold'
@@ -73,7 +76,20 @@ def main():
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     PLOT_PATH.mkdir(parents=True, exist_ok=True)
 
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(OUTPUTS_PATH / "execution.log"),
+            logging.StreamHandler(sys.stdout)
+        ],
+        force=True
+    )
+    logging.info(f"Experiment output directory: {OUTPUTS_PATH}")   
+
     df = pd.read_csv(SUMMARY_PATH)
+    df['sequence_length'] = df['sequence'].apply(len)
     df = df.query("sequence_length <= 500").copy()
 
     print(f"Configuration: USE_MSA={USE_MSA}")
@@ -83,8 +99,12 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     base_model = esm.pretrained.esmfold_v0().eval().to(device)
     
-    ttt_cfg = DEFAULT_ESMFOLD_TTT_CFG
-    ttt_cfg.msa = USE_MSA
+    if USE_GRADIENT_CLIP:
+        ttt_cfg = GRAD_CLIP_ESMFOLD_TTT_CFG
+    else:
+        ttt_cfg = DEFAULT_ESMFOLD_TTT_CFG
+        ttt_cfg.msa = USE_MSA
+
     if USE_MSA:
         base_model.set_chunk_size(128)
         ttt_cfg.gradient_clip = True
@@ -95,6 +115,8 @@ def main():
         ttt_cfg.seed = 0
         ttt_cfg.lr = 0.04
         ttt_cfg.ags = 32
+    logging.info(f"TTT config: {ttt_cfg}")
+
     # learning rate scheduler
     # ttt_cfg.lr_scheduler = "cosine_warmup"
     # ttt_cfg.lr_warmup_steps = 5  # optimizer steps (not micro steps)
@@ -186,10 +208,13 @@ def main():
 
     for i, row in df.iterrows():
         start_time = time.time()
-        seq_id = str(row.get("pdb_id"))
-        chain_id = str(row.get("chain_id"))
+        seq_id = str(row.get("id"))
+        chain_id = str(row.get("chain_id", 'A'))
 
-        true_path = CORRECT_PREDICTED_PDB / f"{seq_id}_{chain_id}.pdb"
+        if USE_TRUE_PDB:
+            true_path = CORRECT_PREDICTED_PDB / f"{seq_id}_{chain_id}.pdb"
+        else:
+            true_path = None
 
         seq = str(row[col]).strip().upper()
         processed_count += 1
@@ -208,13 +233,15 @@ def main():
             pLDDT_ProteinTTT = float(np.asarray(bsio.load_structure(ESM_TTT_DIR / f"{seq_id}_{chain_id}.pdb", extra_fields=["b_factor"]).b_factor, dtype=float).mean())
             pLDDT_ESMFold = float(np.asarray(bsio.load_structure(ESM_DIR / f"{seq_id}_{chain_id}.pdb", extra_fields=["b_factor"]).b_factor, dtype=float).mean())
         try:
-            if pLDDT_ProteinTTT is not None:  # Only calculate metrics if folding succeeded
+            if USE_TRUE_PDB:
                 tm_score_ProteinTTT, lddt_ProteinTTT = calculate_metrics(
                     true_path=true_path,
                     pred_path=ESM_TTT_DIR / f"{seq_id}_{chain_id}.pdb",
                     chain_id=chain_id,
                     path_to_fix_pdb= OUTPUTS_PATH / 'predicted_structures' / 'fixed_pdb_TTT' / f"{seq_id}_{chain_id}.pdb"
                 )
+            else:
+                tm_score_ProteinTTT, lddt_ProteinTTT = None, None
         except Exception as e:
             warnings.warn(f"Metrics for {seq_id}: {e}")
             traceback.print_exc()
@@ -224,12 +251,15 @@ def main():
         df.at[i, 'tm_score_ProteinTTT'] = tm_score_ProteinTTT
 
         try:
-            tm_score_ESMFold, lddt_ESMFold = calculate_metrics(
-                true_path=true_path,
-                pred_path=ESM_DIR / f"{seq_id}_{chain_id}.pdb",
-                chain_id=chain_id,
-                path_to_fix_pdb= OUTPUTS_PATH / 'predicted_structures' / 'fixed_pdb_ESMFold' / f"{seq_id}_{chain_id}.pdb"
-            )
+            if USE_TRUE_PDB:
+                tm_score_ESMFold, lddt_ESMFold = calculate_metrics(
+                    true_path=true_path,
+                    pred_path=ESM_DIR / f"{seq_id}_{chain_id}.pdb",
+                    chain_id=chain_id,
+                    path_to_fix_pdb= OUTPUTS_PATH / 'predicted_structures' / 'fixed_pdb_ESMFold' / f"{seq_id}_{chain_id}.pdb"
+                )
+            else:
+                tm_score_ESMFold, lddt_ESMFold = None, None
         except Exception as e:
             warnings.warn(f"Metrics for {seq_id}: {e}")
             traceback.print_exc()
@@ -252,5 +282,7 @@ def main():
 
 
 if __name__ == "__main__":
-    
-    main()
+    parser = argparse.ArgumentParser(description="Run ESMFold and ProteinTTT on a chunk of sequences.")
+    parser.add_argument('--df_path', type=str, required=True, help='Path to the DataFrame.')
+    args = parser.parse_args()
+    main(df_path=args.df_path)

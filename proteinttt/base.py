@@ -106,12 +106,12 @@ class TTTConfig:
     lr_min: float = 0.0
 
     # FGR (Fidelity-Gain Ratio) stopping criterion parameters
-    fgr_enabled: bool = True
+    fgr_enabled: bool = False
     fgr_drift_threshold: float = 0.1
     fgr_ratio_threshold: float = 0.0
     fgr_early_stopping: bool = False
 
-    fgr_ema_decay: float = 0.9
+    fgr_ema_decay: float = 0.5
     fgr_warmup_steps: int = 5
     fgr_patience: int = 3
     fgr_use_cumulative: bool = True
@@ -494,26 +494,26 @@ class TTTModule(torch.nn.Module, ABC):
                         )
                         break
 
-                # Early stopping - FGR criterion
-                if self.ttt_cfg.fgr_enabled and self.ttt_cfg.fgr_early_stopping:
-                    fgr_stop_drift = eval_step_metric_dict.get("fgr_stop_drift", False)
-                    fgr_stop_ratio = eval_step_metric_dict.get("fgr_stop_ratio", False)
+                # # Early stopping - FGR criterion
+                # if self.ttt_cfg.fgr_enabled and self.ttt_cfg.fgr_early_stopping:
+                #     fgr_stop_drift = eval_step_metric_dict.get("fgr_stop_drift", False)
+                #     fgr_stop_ratio = eval_step_metric_dict.get("fgr_stop_ratio", False)
                     
-                    if fgr_stop_drift:
-                        drift_val = eval_step_metric_dict.get("fgr_drift", "N/A")
-                        self.ttt_logger.info(
-                            f"FGR early stopping at step {step // self.ttt_cfg.ags}: "
-                            f"semantic drift ({drift_val:.4f}) exceeded threshold ({self.ttt_cfg.fgr_drift_threshold})"
-                        )
-                        break
+                #     if fgr_stop_drift:
+                #         drift_val = eval_step_metric_dict.get("fgr_drift", "N/A")
+                #         self.ttt_logger.info(
+                #             f"FGR early stopping at step {step // self.ttt_cfg.ags}: "
+                #             f"semantic drift ({drift_val:.4f}) exceeded threshold ({self.ttt_cfg.fgr_drift_threshold})"
+                #         )
+                #         break
                     
-                    if fgr_stop_ratio and step > 0:
-                        ratio_val = eval_step_metric_dict.get("fgr_ratio", "N/A")
-                        self.ttt_logger.info(
-                            f"FGR early stopping at step {step // self.ttt_cfg.ags}: "
-                            f"efficiency ratio ({ratio_val:.4f}) below threshold ({self.ttt_cfg.fgr_ratio_threshold})"
-                        )
-                        break
+                #     if fgr_stop_ratio and step > 0:
+                #         ratio_val = eval_step_metric_dict.get("fgr_ratio", "N/A")
+                #         self.ttt_logger.info(
+                #             f"FGR early stopping at step {step // self.ttt_cfg.ags}: "
+                #             f"efficiency ratio ({ratio_val:.4f}) below threshold ({self.ttt_cfg.fgr_ratio_threshold})"
+                #         )
+                #         break
 
             # Last step is just for logging
             if step == self.ttt_cfg.steps * self.ttt_cfg.ags:
@@ -764,16 +764,19 @@ class TTTModule(torch.nn.Module, ABC):
             return {}
 
         metrics: dict[str, T.Any] = {
-            "fgr_loss_delta": None,
-            "fgr_drift": None,
-            "fgr_drift_delta": None,
             "fgr_ratio": None,
+            "fgr_loss_delta": None,
+            "fgr_drift_delta": None,
+
             "fgr_ratio_cumulative": None,
-            "fgr_ema_loss": None,
+            "fgr_drift": None,
+            "_fgr_cumulative_loss_gain": None,
+
             "fgr_ema_ratio": None,
-            "fgr_stop_drift": False,
-            "fgr_stop_ratio": False,
-            "fgr_negative_count": 0,
+            # "fgr_stop_drift": False,
+            # "fgr_stop_ratio": False,
+            # "fgr_negative_count": 0,
+            
         }
 
         # Get current representation
@@ -790,7 +793,7 @@ class TTTModule(torch.nn.Module, ABC):
             self._fgr_negative_ratio_count = 0
             
             metrics["fgr_drift"] = 0.0
-            metrics["fgr_ema_loss"] = perplexity
+            # metrics["fgr_ema_loss"] = perplexity
             return metrics
 
         z_0 = self._fgr_anchor_representation
@@ -808,7 +811,7 @@ class TTTModule(torch.nn.Module, ABC):
         # Compute loss delta
         fgr_loss_delta = None
         if perplexity is not None and self._fgr_prev_loss is not None:
-            fgr_loss_delta = self._fgr_prev_loss - perplexity
+            fgr_loss_delta = perplexity - self._fgr_prev_loss
         
         # Update EMA smoothed loss
         if perplexity is not None:
@@ -832,7 +835,7 @@ class TTTModule(torch.nn.Module, ABC):
         # Compute cumulative ratio
         fgr_ratio_cumulative = None
         if perplexity is not None and self._fgr_initial_loss is not None:
-            self._fgr_cumulative_loss_gain = self._fgr_initial_loss - perplexity
+            self._fgr_cumulative_loss_gain = perplexity - self._fgr_initial_loss
             if fgr_drift > self.ttt_cfg.fgr_min_drift_delta:
                 fgr_ratio_cumulative = self._fgr_cumulative_loss_gain / fgr_drift
         
@@ -853,7 +856,7 @@ class TTTModule(torch.nn.Module, ABC):
         # else:
         #     self._fgr_negative_ratio_count = 0
         
-        fgr_stop_drift = fgr_drift > self.ttt_cfg.fgr_drift_threshold
+        # fgr_stop_drift = fgr_drift > self.ttt_cfg.fgr_drift_threshold
         
         # fgr_stop_ratio = (
         #     step >= self.ttt_cfg.fgr_warmup_steps
@@ -864,15 +867,13 @@ class TTTModule(torch.nn.Module, ABC):
         self._fgr_prev_drift = fgr_drift
 
         metrics["fgr_loss_delta"] = fgr_loss_delta
-        metrics["fgr_drift"] = fgr_drift
-        metrics["fgr_drift_delta"] = fgr_drift_delta
+        metrics["fgr_drift_delta"] = abs(fgr_drift_delta)
         metrics["fgr_ratio"] = fgr_ratio
+
+        metrics["fgr_drift"] = fgr_drift
+        metrics["_fgr_cumulative_loss_gain"] = self._fgr_cumulative_loss_gain
         metrics["fgr_ratio_cumulative"] = fgr_ratio_cumulative
-        metrics["fgr_ema_loss"] = self._fgr_ema_loss
         metrics["fgr_ema_ratio"] = fgr_ema_ratio
-        metrics["fgr_stop_drift"] = fgr_stop_drift
-        # metrics["fgr_stop_ratio"] = fgr_stop_ratio
-        # metrics["fgr_negative_count"] = self._fgr_negative_ratio_count
         
         return metrics
 

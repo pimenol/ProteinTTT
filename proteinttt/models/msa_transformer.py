@@ -101,6 +101,24 @@ class MSATransformerTTT(TTTModule, MSATransformer):
     ) -> torch.Tensor:
         return self(batch)["logits"]  # [1, msa_len, seq_len, vocab_size]
 
+    # def _ttt_get_representation(
+    #     self, x: torch.Tensor, **kwargs
+    # ) -> torch.Tensor:
+    #     with torch.no_grad():
+    #         output = self(x, repr_layers=[self.num_layers])
+    #         representations = output["representations"][self.num_layers]
+    #         query_repr = representations[0, 0, :, :]  
+    #         non_special_tokens = self._ttt_get_non_special_tokens()
+    #         query_tokens = x[0, 0, :]  
+    #         non_special_mask = torch.isin(
+    #             query_tokens, torch.tensor(non_special_tokens, device=x.device)
+    #         )
+    #         if non_special_mask.sum() > 0:
+    #             pooled = query_repr[non_special_mask].mean(dim=0)
+    #         else:
+    #             pooled = query_repr.mean(dim=0)
+    #     return pooled
+
     def _ttt_sample_batch(
         self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:

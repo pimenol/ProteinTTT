@@ -65,6 +65,9 @@ class ESMFoldTTT(TTTModule, ESMFold):
     def _ttt_predict_logits(
         self, batch: torch.Tensor, start_indices: torch.Tensor = None, **kwargs
     ) -> torch.Tensor:
+        # Move batch to the same device as the model
+        device = next(self.esm.parameters()).device
+        batch = batch.to(device)
         return self.esm(batch)[
             "logits"
         ]  # [bs, seq_len] -> [bs, seq_len, vocab_size]

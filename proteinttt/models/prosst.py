@@ -88,3 +88,35 @@ class ProSSTTTT(TTTModule, MODEL_CLASS):
         # Predict logits
         outputs = self(input_ids=batch, ss_input_ids=ss_input_ids)
         return outputs.logits  # [bs, seq_len, vocab_size]
+
+    def _ttt_get_representation(
+        self, x: torch.Tensor, **kwargs
+    ) -> torch.Tensor:
+        """Extract mean-pooled representation from ProSST for FGR computation.
+
+        Args:
+            x: Input sequence tensor [1, sequence_length]
+            **kwargs: Must include 'ss_input_ids' for structure sequence
+
+        Returns:
+            Mean-pooled representation tensor [hidden_dim]
+        """
+        with torch.no_grad():
+            ss_input_ids = kwargs.get("ss_input_ids", None)
+            if ss_input_ids is None:
+                # Fallback to base implementation if no structure sequence
+                return super()._ttt_get_representation(x, **kwargs)
+            
+            outputs = self.prosst(input_ids=x, ss_input_ids=ss_input_ids, output_hidden_states=True)
+            # Get last hidden state: [batch, seq_len, hidden_dim]
+            hidden_states = outputs.last_hidden_state
+            # Mean pool over sequence (excluding special tokens)
+            non_special_tokens = self._ttt_get_non_special_tokens()
+            non_special_mask = torch.isin(
+                x[0], torch.tensor(non_special_tokens, device=x.device)
+            )
+            if non_special_mask.sum() > 0:
+                pooled = hidden_states[0, non_special_mask].mean(dim=0)
+            else:
+                pooled = hidden_states[0].mean(dim=0)
+        return pooled

@@ -59,3 +59,29 @@ class ESM2TTT_HF(TTTModule, EsmForMaskedLM):
         attention_mask = (batch != self._ttt_get_padding_token()).long()
         outputs = self(input_ids=batch, attention_mask=attention_mask)
         return outputs.logits  # [bs, seq_len, vocab_size]
+
+    # def _ttt_get_representation(
+    #     self, x: torch.Tensor, **kwargs
+    # ) -> torch.Tensor:
+    #     """Extract mean-pooled representation from ESM2 (HuggingFace) for FGR computation.
+
+    #     Args:
+    #         x: Input sequence tensor [1, sequence_length]
+    #         **kwargs: Additional arguments (unused)
+
+    #     Returns:
+    #         Mean-pooled representation tensor [hidden_dim]
+    #     """
+    #     with torch.no_grad():
+    #         attention_mask = (x != self._ttt_get_padding_token()).long()
+    #         outputs = self.esm(input_ids=x, attention_mask=attention_mask, output_hidden_states=True)
+    #         hidden_states = outputs.last_hidden_state
+    #         non_special_tokens = self._ttt_get_non_special_tokens()
+    #         non_special_mask = torch.isin(
+    #             x[0], torch.tensor(non_special_tokens, device=x.device)
+    #         )
+    #         if non_special_mask.sum() > 0:
+    #             pooled = hidden_states[0, non_special_mask].mean(dim=0)
+    #         else:
+    #             pooled = hidden_states[0].mean(dim=0)
+    #     return pooled
