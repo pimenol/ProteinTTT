@@ -1,18 +1,44 @@
 import subprocess
-import os
-from pathlib import Path
-
 import numpy as np
+from pathlib import Path
 import Bio.PDB as bp
 import biotite.structure.io as bsio
+from proteinttt.utils.fix_pdb import fix_pdb
 
-from proteinttt.utils.protein import AA3_TO_AA1
+import subprocess
+import os
+from pathlib import Path
+import numpy as np
+
+AA3_TO_AA1 = {
+    "ALA": "A",
+    "CYS": "C",
+    "ASP": "D",
+    "GLU": "E",
+    "PHE": "F",
+    "GLY": "G",
+    "HIS": "H",
+    "ILE": "I",
+    "LYS": "K",
+    "LEU": "L",
+    "MET": "M",
+    "ASN": "N",
+    "PRO": "P",
+    "GLN": "Q",
+    "ARG": "R",
+    "SER": "S",
+    "THR": "T",
+    "VAL": "V",
+    "TRP": "W",
+    "TYR": "Y",
+}
 
 
 def calculate_tm_score(
     pred_path,
     pdb_path,
     chain_id=None,
+    use_tmalign=False,
     verbose=False,
     tmscore_path=None,
     tmalign_path=None,
@@ -26,6 +52,7 @@ def calculate_tm_score(
         pred_path: Path to predicted structure PDB file
         pdb_path: Path to reference structure PDB file
         chain_id: Chain ID to use (not implemented)
+        use_tmalign: Whether to use TMalign instead of TMscore executable
         verbose: Whether to print command and output details
         tmscore_path: Path to TMscore executable
         tmalign_path: Path to TMalign executable
@@ -42,17 +69,17 @@ def calculate_tm_score(
             "Chain ID is not implemented for TM-score calculation."
         )
 
-    num_provided = sum(x is not None for x in (tmscore_path, tmalign_path))
-    if num_provided != 1:
+    if tmscore_path is None or tmalign_path is None:
         raise ValueError(
-            "Exactly one of tmscore_path or tmalign_path must be provided."
+            "Paths to TMscore and TMalign executables must be provided."
         )
 
-    if tmscore_path is not None:
-        command = [tmscore_path, pred_path, pdb_path]
-    else:
-        command = [tmalign_path, pdb_path, pred_path]
-
+    # Run TMscore and capture the output
+    command = (
+        [tmalign_path, pdb_path, pred_path]
+        if use_tmalign
+        else [tmscore_path, pred_path, pdb_path]
+    )
     result = subprocess.run(
         command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
@@ -64,7 +91,6 @@ def calculate_tm_score(
         print(result.stdout)
         print("TMscore error:")
         print(result.stderr)
-
     if verbose:
         print_cmd()
 
@@ -164,6 +190,20 @@ def calculate_plddt(pdb_file_path):
     pLDDT = float(np.asarray(struct.b_factor, dtype=float).mean())
     return pLDDT
 
+
+def calculate_metrics(true_path, pred_path, chain_id=None, path_to_fix_pdb=None):
+    if path_to_fix_pdb is not None and chain_id is not None:
+        fix_pdb(true_path, pred_path, chain_id, path_to_fix_pdb)
+
+        tm_score = calculate_tm_score(path_to_fix_pdb, true_path)
+        lddt = lddt_score(true_path, path_to_fix_pdb)
+        pLDDT = calculate_plddt(path_to_fix_pdb)
+    else:
+        tm_score = calculate_tm_score(pred_path, true_path)
+        lddt = lddt_score(true_path, pred_path)
+        pLDDT = calculate_plddt(pred_path)
+
+    return tm_score, lddt, pLDDT
 
 def get_sequence_from_pdb(pdb_path: str) -> str:
     """
