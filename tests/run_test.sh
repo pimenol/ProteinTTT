@@ -12,8 +12,7 @@
 source "/scratch/project/open-35-8/pimenol1/miniconda3/etc/profile.d/conda.sh"
 conda activate proteinttt2
 
-cd /scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT || exit 1
-export PYTHONPATH="${PYTHONPATH}:/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT"
+export PYTHONPATH="${PYTHONPATH}:/scratch/project/open-35-8/pimenol1/ProteinTTT_merge/ProteinTTT"
 
 python tests/test_esmfold_ttt.py
 

@@ -9,7 +9,8 @@ from pathlib import Path
 import torch
 import esm
 import biotite.structure.io as bsio
-
+import proteinttt
+print(proteinttt.__file__)
 from proteinttt.models.esmfold import ESMFoldTTT, DEFAULT_ESMFOLD_TTT_CFG
 
 TEST_SEQUENCE = "GIHLGELGLLPSTVLAIGYFENLVNIICESLNMLPKLEVSGKEYKKFKFTIVIPKDLDANIKKRAKIYFKQKSLIEIEIPTSSRNYPIHIQFDENSTDDILHLYDMPTTIGGIDKAIEMFMRKGHIGKTDQQKLLEERELRNFKTTLENLIATDAFAKEMVEVIIEE"
@@ -53,7 +54,7 @@ def test_esmfold_ttt_improves_plddt_2x():
     ttt_cfg.seed = 0
     ttt_cfg.steps = 10
     
-    ttt_model = ESMFoldTTT.ttt_from_pretrained(model, esmfold_config=model.cfg)
+    ttt_model = ESMFoldTTT.ttt_from_pretrained(model, ttt_cfg=ttt_cfg, esmfold_config=model.cfg)
     ttt_model.ttt(sequence)
     
     print("Running inference after TTT...")
