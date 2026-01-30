@@ -6,6 +6,7 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass
+import warnings 
 
 import pandas as pd
 import torch
@@ -56,6 +57,8 @@ class TTTConfig:
         log_name: Name for logger
         logger_level: Logging verbosity level
         tmalign_path: Path to TMalign executable
+        gradient_clip: Whether to apply gradient clipping to prevent instability
+        gradient_clip_max_norm: Maximum gradient norm for clipping (only used if gradient_clip=True)
     """
 
     lr: float = 4e-4
@@ -82,7 +85,7 @@ class TTTConfig:
     msa_cache_dir: Path = Path.home() / ".cache" / "ttt"
     score_seq_kind: T.Optional[
         str
-    ] = None  # T.Optional[T.Literal['pseudo_perplexity', 'gordon2024', 'none']] = None
+    ] = None  # T.Optional[T.Literal['pseudo_perplexity', 'scaled_pseudo_perplexity', 'gordon2024', 'none']] = None
     score_seq_steps_list: T.Any = (
         None  # T.Optional[int | list[int]]. None to use all steps
     )
@@ -97,6 +100,13 @@ class TTTConfig:
         "INFO"  # T.Literal['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
     )
     tmalign_path: T.Optional[Path] = None
+    
+    gradient_clip: bool = False
+    gradient_clip_max_norm: float = 1.0
+
+    lr_scheduler: str | None = None  # None, 'cosine', 'cosine_warmup'
+    lr_warmup_steps: int = 0  
+    lr_min: float = 0.0
 
     @classmethod
     def from_yaml(cls, yaml_path: T.Union[str, Path]) -> "TTTConfig":
@@ -314,13 +324,13 @@ class TTTModule(torch.nn.Module, ABC):
 
             # Read MSA by replacing all insertions with padding tokens, then tokenize each sequence, and stack them
             msa = []
-            for seq in read_msa(
+            for seq_msa in read_msa(
                 msa_pth,
                 replace_inserstions=self._ttt_token_to_str(
                     self._ttt_get_padding_token()
                 ),
             ):
-                msa.append(self._ttt_tokenize(seq, **kwargs).squeeze(0))
+                msa.append(self._ttt_tokenize(seq_msa, **kwargs).squeeze(0))
             msa = torch.stack(msa)  # [msa_len, seq_len]
 
             # Check the MSA contains the target sequence as the first sequence
@@ -332,7 +342,6 @@ class TTTModule(torch.nn.Module, ABC):
             # - except for MSA soft labels where MSA is only used for loss calculation
             if not self.ttt_cfg.loss_kind == "msa_soft_labels":
                 x = msa
-
         # Get trainable parameters and optimizer
         parameters = self._ttt_get_parameters()
         optimizer = self._ttt_get_optimizer(parameters)
@@ -348,6 +357,32 @@ class TTTModule(torch.nn.Module, ABC):
         if self.ttt_cfg.automatic_best_state_reset:
             best_confidence = 0
             best_state = None
+
+        device = next(self.parameters()).device
+        non_blocking = device.type == "cuda"
+        cached_trainable_params = [p for p in self.parameters() if p.requires_grad]
+
+        # Setup LR scheduler 
+        scheduler = None
+        if self.ttt_cfg.lr_scheduler == "cosine":
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=self.ttt_cfg.steps, eta_min=self.ttt_cfg.lr_min
+            )
+        elif self.ttt_cfg.lr_scheduler == "cosine_warmup":
+            import math
+            warmup = max(0, int(self.ttt_cfg.lr_warmup_steps))
+            min_factor = (
+                self.ttt_cfg.lr_min / self.ttt_cfg.lr if self.ttt_cfg.lr > 0 else 0.0
+            )
+
+            def lr_mult(step_idx: int):
+                # step_idx counts optimizer steps: 0..steps-1
+                if warmup > 0 and step_idx < warmup:
+                    return (step_idx + 1) / max(1, warmup)
+                progress = (step_idx - warmup) / max(1, self.ttt_cfg.steps - warmup)
+                return min_factor + 0.5 * (1.0 - min_factor) * (1.0 + math.cos(math.pi * progress))
+
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_mult)
 
         # Run TTT loop
         loss = None
@@ -376,10 +411,8 @@ class TTTModule(torch.nn.Module, ABC):
                 )
                 if should_score:
                     score_seq_start_time = time.time()
-                    # Take only the input sequence for scoring
                     seq_to_score = x[0:1, :]
                     all_log_probs, perplexity = self._ttt_score_seq(seq_to_score, **kwargs)
-                    
                     score_seq_time = time.time() - score_seq_start_time
                     all_log_probs = [prob.detach().cpu() for prob in all_log_probs]
                     ttt_step_data[step // self.ttt_cfg.ags][
@@ -417,9 +450,9 @@ class TTTModule(torch.nn.Module, ABC):
                             best_state = self._ttt_get_state()
                 else:
                     eval_step_metric_dict = {}
-                ttt_step_data[step // self.ttt_cfg.ags][
-                    "eval_step_preds"
-                ] = eval_step_preds
+                    eval_step_preds = None
+                if eval_step_preds is not None:
+                    ttt_step_data[step // self.ttt_cfg.ags]["eval_step_preds"] = eval_step_preds
 
                 # Store all metrics in a row
                 row = dict(
@@ -430,6 +463,7 @@ class TTTModule(torch.nn.Module, ABC):
                     ttt_step_time=ttt_step_time,
                     score_seq_time=score_seq_time,
                     eval_step_time=eval_step_time,
+                    lr=optimizer.param_groups[0]["lr"],
                     **eval_step_metric_dict,
                 )
                 df.append(row)
@@ -461,12 +495,11 @@ class TTTModule(torch.nn.Module, ABC):
                 break
 
             # Move the sampled batch to the GPU
-            device = next(self.parameters()).device
-            batch_masked = batch_masked.to(device)
-            targets = targets.to(device)
-            mask = mask.to(device)
+            batch_masked = batch_masked.to(device, non_blocking=non_blocking)
+            targets = targets.to(device, non_blocking=non_blocking)
+            mask = mask.to(device, non_blocking=non_blocking)
             if start_indices is not None:
-                start_indices = start_indices.to(device)
+                start_indices = start_indices.to(device, non_blocking=non_blocking)
 
             # Forward pass
             self.train()
@@ -501,8 +534,32 @@ class TTTModule(torch.nn.Module, ABC):
             # Backward pass
             loss.backward()
             if (step + 1) % self.ttt_cfg.ags == 0:
-                optimizer.step()
-                optimizer.zero_grad()
+                trainable_params = [p for p in cached_trainable_params if p.grad is not None]
+                
+                # Check for NaN/Inf gradients - skip update if found
+                has_nan_grad = False
+                for param in trainable_params:
+                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                        has_nan_grad = True
+                        break
+                
+                if has_nan_grad:
+                    # Skip this update and zero gradients to prevent model corruption
+                    optimizer.zero_grad(set_to_none=True)
+                    warnings.warn(f"NaN/Inf gradient detected at step {step}, skipping update")
+                else:
+                    # Apply gradient clipping if enabled in config
+                    if self.ttt_cfg.gradient_clip and len(trainable_params) > 0:
+                        torch.nn.utils.clip_grad_norm_(
+                            trainable_params, 
+                            max_norm=self.ttt_cfg.gradient_clip_max_norm
+                        )
+                    
+                    optimizer.step()
+                    if scheduler is not None:
+                        scheduler.step()
+                    optimizer.zero_grad(set_to_none=True)
+                
             self.eval()
 
         # Reset to best state to have the most confident model after TTT
@@ -742,16 +799,14 @@ class TTTModule(torch.nn.Module, ABC):
         The whole modules rather than parameters are saved to avoid support changing
         modules such as in the case of LoRA.
 
-        TODO: Optimize memory by only saving modules from _ttt_get_trainable_modules()
-
         Returns:
             Dictionary mapping module names to their copied states
         """
         state = {}
-
+        trainable_modules = set(self._ttt_get_trainable_modules())
         for name, module in self.named_children():
-            state[name] = copy.deepcopy(module)
-
+            if module in trainable_modules:
+                state[name] = copy.deepcopy(module)
         return state
 
     def _ttt_set_state(self, state: T.Any) -> None:
@@ -1065,6 +1120,10 @@ class TTTModule(torch.nn.Module, ABC):
             all_log_probs, perplexity = self._ttt_score_seq_pseudo_perplexity(
                 x, **kwargs
             )
+        elif self.ttt_cfg.score_seq_kind == "scaled_pseudo_perplexity":
+            all_log_probs, perplexity = self._ttt_score_seq_scaled_pseudo_perplexity(
+                x, **kwargs
+            )
         elif self.ttt_cfg.score_seq_kind == "gordon2024":
             all_log_probs, perplexity = self._ttt_score_seq_gordon2024(
                 x, **kwargs
@@ -1151,9 +1210,31 @@ class TTTModule(torch.nn.Module, ABC):
 
         return all_log_probs, perplexity
 
-    def _ttt_score_seq_gordon2024(
+    def _ttt_score_seq_scaled_pseudo_perplexity(
         self, x: torch.Tensor, **kwargs
     ) -> T.Tuple[T.List[torch.Tensor], float]:
+        """Score sequence using scaled pseudo-perplexity.
+
+        Calculates pseudo-perplexity and scales it to a reliability score between 0 and 1
+        using the formula: (20 - PPPL(wildtype)) / 19
+
+        Args:
+            x: Input sequence tensor [1, sequence_length]
+            **kwargs: Additional arguments passed to model forward pass
+
+        Returns:
+            tuple containing:
+                - all_log_probs: Log probabilities for each token in the sequence when masked
+                - scaled_perplexity: Scaled pseudo-perplexity (reliability score between 0 and 1)
+        """
+        all_log_probs, perplexity = self._ttt_score_seq_pseudo_perplexity(x, **kwargs)
+        scaled_perplexity = (20.0 - perplexity) / 19.0
+        scaled_perplexity = max(0.0, scaled_perplexity)
+        return all_log_probs, scaled_perplexity
+
+    def _ttt_score_seq_gordon2024(
+        self, x: torch.Tensor, **kwargs
+    ) -> tuple[list[torch.Tensor], float]:
         """Score sequence using method from Gordon et al. 2024.
 
         Implements sequence scoring method from Gordon et al. 2024
