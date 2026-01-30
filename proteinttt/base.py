@@ -55,6 +55,7 @@ class TTTConfig:
         log_file_path: Path to save log file
         log_name: Name for logger
         logger_level: Logging verbosity level
+        tmalign_path: Path to TMalign executable
     """
 
     lr: float = 4e-4
@@ -76,6 +77,7 @@ class TTTConfig:
     bert_leave_prob: float = 0.1
     bert_replace_prob: float = 0.1
     loss_kind: str = "cross_entropy"  # T.Literal['cross_entropy', 'unnormalized_cross_entropy', 'msa_soft_labels' TODO]
+    model_kind: str = "bidirectional"  # T.Literal['bidirectional', 'autoregressive']
     msa: T.Optional[bool] = False
     msa_cache_dir: Path = Path.home() / ".cache" / "ttt"
     score_seq_kind: T.Optional[
@@ -94,9 +96,10 @@ class TTTConfig:
     logger_level: str = (
         "INFO"  # T.Literal['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
     )
+    tmalign_path: T.Optional[Path] = None
 
     @classmethod
-    def from_yaml(cls, yaml_path: str | Path) -> "TTTConfig":
+    def from_yaml(cls, yaml_path: T.Union[str, Path]) -> "TTTConfig":
         """Load TTTConfig from a YAML file using OmegaConf.
 
         Args:
@@ -153,11 +156,33 @@ class TTTConfig:
                 "msa_soft_labels loss kind can only be used if msa=True"
             )
 
-        if lora_rank > 0 and inject_trainable_lora is None:
+        if self.lora_rank > 0 and inject_trainable_lora is None:
             raise ImportError(
                 "lora_diffusion is not installed. Please install it with "
                 "`pip install git+https://github.com/cloneofsimo/lora.git`."
             )
+
+        if self.model_kind not in ['bidirectional', 'autoregressive']:
+            raise ValueError(
+                f"Invalid model kind: {self.model_kind}. Valid model kinds are 'bidirectional' and 'autoregressive'"
+            )
+
+        if self.model_kind == "autoregressive":
+            if self.loss_kind != "unnormalized_cross_entropy":
+                raise ValueError(
+                    "Only loss kind 'unnormalized_cross_entropy' is supported for autoregressive models"
+                )
+            if self.batch_size != 1:
+                raise ValueError(
+                    "Batch size must be 1 for autoregressive models"
+                )
+            if self.score_seq_kind is not None:
+                raise ValueError(
+                    "Scoring for autoregressive models is not implemented yet"
+                )
+
+        if self.tmalign_path is not None and not self.tmalign_path.exists():
+            raise FileNotFoundError(f"TMalign executable not found at {self.tmalign_path}")
 
 
 class TTTModule(torch.nn.Module, ABC):
@@ -181,7 +206,7 @@ class TTTModule(torch.nn.Module, ABC):
 
     ttt_default_cfg: T.Optional[TTTConfig] = None
 
-    def __init__(self, ttt_cfg: T.Optional[TTTConfig | Path | str] = None):
+    def __init__(self, ttt_cfg: T.Optional[T.Union[TTTConfig, Path, str]] = None):
         """Initialize TTTModule.
 
         Args:
@@ -261,7 +286,7 @@ class TTTModule(torch.nn.Module, ABC):
         seq: T.Optional[str] = None,
         msa_pth: T.Optional[Path] = None,
         **kwargs,
-    ) -> dict[str, T.Any]:
+    ) -> T.Dict[str, T.Any]:
         """Run test-time training loop to customize model to input protein.
 
         Performs iterative optimization to adapt the model's parameters to better fit
@@ -325,7 +350,6 @@ class TTTModule(torch.nn.Module, ABC):
             best_state = None
 
         # Run TTT loop
-        x = x.to(next(self.parameters()).device)
         loss = None
         self.eval()
         for step in range(self.ttt_cfg.steps * self.ttt_cfg.ags + 1):
@@ -352,9 +376,12 @@ class TTTModule(torch.nn.Module, ABC):
                 )
                 if should_score:
                     score_seq_start_time = time.time()
-                    all_log_probs, perplexity = self._ttt_score_seq(x, **kwargs)
+                    # Take only the input sequence for scoring
+                    seq_to_score = x[0:1, :]
+                    all_log_probs, perplexity = self._ttt_score_seq(seq_to_score, **kwargs)
+                    
                     score_seq_time = time.time() - score_seq_start_time
-                    all_log_probs = [x.detach().cpu() for x in all_log_probs]
+                    all_log_probs = [prob.detach().cpu() for prob in all_log_probs]
                     ttt_step_data[step // self.ttt_cfg.ags][
                         "all_log_probs"
                     ] = all_log_probs
@@ -433,6 +460,14 @@ class TTTModule(torch.nn.Module, ABC):
             if step == self.ttt_cfg.steps * self.ttt_cfg.ags:
                 break
 
+            # Move the sampled batch to the GPU
+            device = next(self.parameters()).device
+            batch_masked = batch_masked.to(device)
+            targets = targets.to(device)
+            mask = mask.to(device)
+            if start_indices is not None:
+                start_indices = start_indices.to(device)
+
             # Forward pass
             self.train()
             logits = self._ttt_predict_logits(
@@ -443,9 +478,17 @@ class TTTModule(torch.nn.Module, ABC):
             if self.ttt_cfg.loss_kind == "cross_entropy":
                 loss = self._ttt_cross_entropy_loss(logits, targets, mask)
             elif self.ttt_cfg.loss_kind == "unnormalized_cross_entropy":
-                loss = self._ttt_unnormalized_cross_entropy_loss(
-                    logits, targets, mask
-                )
+                if self.ttt_cfg.model_kind == "bidirectional":
+                    loss = self._ttt_unnormalized_cross_entropy_loss(
+                        logits, targets, mask
+                    )
+                elif self.ttt_cfg.model_kind == "autoregressive":
+                    seq_start = start_indices[0]  # [0] because batch size is always 1 for autoregressive models
+                    seq_end = seq_start + self.ttt_cfg.crop_size
+                    targets = x[:, seq_start + 1:seq_end]  # + 1 for teacher forcing, logits should be shifted by - 1 in TTTModule._ttt_predict_logits
+                    loss = self._ttt_unnormalized_cross_entropy_loss(
+                        logits, targets, None
+                    )
             elif self.ttt_cfg.loss_kind == "msa_soft_labels":
                 loss = self._ttt_msa_soft_labels_loss(
                     logits, targets, mask, msa, start_indices
@@ -530,19 +573,32 @@ class TTTModule(torch.nn.Module, ABC):
         )
 
     @abstractmethod
-    def _ttt_get_non_special_tokens(self) -> torch.Tensor:
+    def _ttt_get_non_special_tokens(self) -> T.List[int]:
         """Get indices of non-special tokens (e.g. 20 standard amino acids).
 
         Returns:
-            Tensor of token indices
+            List of token indices
         """
         raise NotImplementedError(
             "Subclass must implement _ttt_get_non_special_tokens method"
         )
 
-    @abstractmethod
+    def _ttt_get_token_replacement_candidates(self, token: int) -> T.List[int]:
+        """Get candidates for token replacement.
+
+        For some models (e.g. DPLM2), the replacement candidates differ for sequence and
+        structure tokens. So, simply returning all non-special tokens may not be sufficient
+        and a different implementation may be needed.
+
+        Returns:
+            List of token indices
+        """
+        return self._ttt_get_non_special_tokens()
+
     def _ttt_get_padding_token(self) -> int:
         """Get index of padding token.
+
+        This abstrcact method is optional. The error will be raised if the implementation is needed.
 
         Returns:
             Padding token index
@@ -551,9 +607,10 @@ class TTTModule(torch.nn.Module, ABC):
             "Subclass must implement _ttt_get_padding_token method"
         )
 
-    @abstractmethod
     def _ttt_token_to_str(self, token: int) -> str:
         """Convert token index to string representation.
+
+        This abstrcact method is optional. The error will be raised if the implementation is needed.
 
         Args:
             token: Token index
@@ -565,7 +622,7 @@ class TTTModule(torch.nn.Module, ABC):
             "Subclass must implement _ttt_token_to_str method"
         )
 
-    def _ttt_get_trainable_modules(self) -> list[torch.nn.Module]:
+    def _ttt_get_trainable_modules(self) -> T.List[torch.nn.Module]:
         """Get list of modules to train.
 
         Note that some parameters in these modules may still be frozen by
@@ -576,7 +633,7 @@ class TTTModule(torch.nn.Module, ABC):
         """
         return [self]
 
-    def _ttt_get_frozen_modules(self) -> list[torch.nn.Module]:
+    def _ttt_get_frozen_modules(self) -> T.List[torch.nn.Module]:
         """Get list of modules to freeze during training.
 
         Returns:
@@ -590,6 +647,11 @@ class TTTModule(torch.nn.Module, ABC):
         If LoRA is enabled, injects LoRA layers and makes only those parameters
         trainable. Otherwise makes parameters trainable in modules from
         _ttt_get_trainable_modules excluding those in _ttt_get_frozen_modules.
+
+        TODO: If one wants to further customize an already customized model without resetting,
+        this currently fails with `ValueError: optimizer got an empty parameter list` when LoRA is
+        enabled. This is not an intended use case, but supporting it in the future could be 
+        interesting.
 
         Returns:
             Iterator of parameters requiring gradients
@@ -686,8 +748,10 @@ class TTTModule(torch.nn.Module, ABC):
             Dictionary mapping module names to their copied states
         """
         state = {}
+
         for name, module in self.named_children():
             state[name] = copy.deepcopy(module)
+
         return state
 
     def _ttt_set_state(self, state: T.Any) -> None:
@@ -703,7 +767,7 @@ class TTTModule(torch.nn.Module, ABC):
 
     def _ttt_sample_batch(
         self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> T.Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Sample and mask a batch of sequences for training.
 
         Args:
@@ -785,6 +849,7 @@ class TTTModule(torch.nn.Module, ABC):
         batch_masked = batch_cropped.clone()
         for i in range(batch_size):
             for idx in torch.nonzero(mask[i], as_tuple=True)[0]:
+                orig_token = batch_masked[i, idx].item()
                 if (
                     self.ttt_cfg.bert_leave_prob
                     + self.ttt_cfg.bert_replace_prob
@@ -803,10 +868,11 @@ class TTTModule(torch.nn.Module, ABC):
                     elif (
                         prob < 1 - self.ttt_cfg.bert_leave_prob
                     ):  # 10% chance to change to random token
-                        batch_masked[i, idx] = non_special_tokens[
+                        cands = self._ttt_get_token_replacement_candidates(orig_token)
+                        batch_masked[i, idx] = cands[
                             torch.randint(
                                 0,
-                                len(non_special_tokens),
+                                len(cands),
                                 (1,),
                                 generator=self.ttt_generator,
                             ).item()
@@ -973,7 +1039,7 @@ class TTTModule(torch.nn.Module, ABC):
 
     def _ttt_score_seq(
         self, x: torch.Tensor, **kwargs
-    ) -> tuple[list[torch.Tensor], float]:
+    ) -> T.Tuple[T.List[torch.Tensor], float]:
         """Score a sequence.
 
         If the sequence is a multiple sequence alignment (MSA), only the first sequence is
@@ -1012,7 +1078,7 @@ class TTTModule(torch.nn.Module, ABC):
 
     def _ttt_score_seq_pseudo_perplexity(
         self, x: torch.Tensor, **kwargs
-    ) -> tuple[list[torch.Tensor], float]:
+    ) -> T.Tuple[T.List[torch.Tensor], float]:
         """Score sequence using pseudo-perplexity.
 
         Calculates pseudo-perplexity by masking each token one at a time and computing
@@ -1087,7 +1153,7 @@ class TTTModule(torch.nn.Module, ABC):
 
     def _ttt_score_seq_gordon2024(
         self, x: torch.Tensor, **kwargs
-    ) -> tuple[list[torch.Tensor], float]:
+    ) -> T.Tuple[T.List[torch.Tensor], float]:
         """Score sequence using method from Gordon et al. 2024.
 
         Implements sequence scoring method from Gordon et al. 2024
@@ -1155,7 +1221,7 @@ class TTTModule(torch.nn.Module, ABC):
         seq: str,
         msa_pth: Path,
         **kwargs,
-    ) -> tuple[dict, dict, T.Optional[float]]:
+    ) -> T.Tuple[dict, dict, T.Optional[float]]:
         """Evaluate model during test-time training (e.g., to select the optimal step).
 
         Base implementation that returns empty dictionaries. Child classes should override
