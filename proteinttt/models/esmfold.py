@@ -1,20 +1,23 @@
 import typing as T
-import tempfile
 from pathlib import Path
+import tempfile
 
-import biotite.structure.io as bsio
 import torch
 import esm
 from esm.esmfold.v1.esmfold import ESMFold
 
 from proteinttt.base import TTTModule, TTTConfig
-from proteinttt.utils.structure import lddt_score, calculate_tm_score
+from proteinttt.utils.structure import calculate_tm_score, lddt_score
+
 
 
 DEFAULT_ESMFOLD_TTT_CFG = TTTConfig(
     lr=4e-4, batch_size=4, ags=4, steps=30, lora_rank=8, lora_alpha=32.0
 )
 
+GRAD_CLIP_ESMFOLD_TTT_CFG = TTTConfig(
+    lr=0.002, batch_size=4, ags=4, steps=30, lora_rank=128, lora_alpha=256.0, gradient_clip=True, gradient_clip_max_norm=1.0
+)
 
 class ESMFoldTTT(TTTModule, ESMFold):
     ttt_default_cfg = DEFAULT_ESMFOLD_TTT_CFG
@@ -26,6 +29,8 @@ class ESMFoldTTT(TTTModule, ESMFold):
             "ESM-1b"
         )  # ESM2 uses ESM-1b alphabet
         self.ttt_batch_converter = self.ttt_alphabet.get_batch_converter()
+        # Reusable temp file path to avoid creating new temp files each eval step
+        self._ttt_temp_pdb_path = None
 
     def _ttt_tokenize(self, seq: str, **kwargs) -> torch.Tensor:
         _, _, x = self.ttt_batch_converter([(None, seq)])
@@ -64,6 +69,14 @@ class ESMFoldTTT(TTTModule, ESMFold):
             "logits"
         ]  # [bs, seq_len] -> [bs, seq_len, vocab_size]
 
+    def ttt_reset(self) -> None:
+        """Reset model and cleanup temporary files."""
+        super().ttt_reset()
+        # Clean up temporary PDB file if it exists
+        if self._ttt_temp_pdb_path is not None and self._ttt_temp_pdb_path.exists():
+            self._ttt_temp_pdb_path.unlink()
+            self._ttt_temp_pdb_path = None
+
     def _ttt_eval_step(
         self,
         step: int,
@@ -72,36 +85,47 @@ class ESMFoldTTT(TTTModule, ESMFold):
         all_log_probs: torch.Tensor,
         seq: str,
         msa_pth: Path,
-        **kwargs
-    ) -> tuple[dict, dict, T.Optional[float]]:
-        eval_step_metric_dict = {}
+        correct_pdb_path: T.Optional[Path] = None,
+        **kwargs,
+    ) -> T.Tuple[dict, dict, T.Optional[float]]:
+        _, base_metrics, _ = super()._ttt_eval_step(
+            step=step,
+            loss=loss,
+            perplexity=perplexity,
+            all_log_probs=all_log_probs,
+            seq=seq,
+            msa_pth=msa_pth,
+            **kwargs,
+        )
 
         # Predict structure
         with torch.no_grad():
-            pdb_str = self.infer_pdb(seq, masking_pattern=None)
+            output = self.infer(seq, masking_pattern=None)
 
-        # Calculate pLDDT
-        # TODO Optimize by not saving to disk
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.pdb') as tmp:
-            tmp.write(pdb_str)
-            tmp.flush()
-            struct = bsio.load_structure(tmp.name, extra_fields=["b_factor"])
-            plddt = struct.b_factor.mean()
+        pdb_str = self.output_to_pdb(output)
+        plddt = output["mean_plddt"].item()
 
-            # Calculate LDDT and TM-score if reference PDB is provided
-            if "ref_pdb_pth" in kwargs and kwargs["ref_pdb_pth"] is not None:
-                lddt = lddt_score(kwargs["ref_pdb_pth"], tmp.name)
-                eval_step_metric_dict['lddt'] = lddt
-                if self.ttt_cfg.tmalign_path is not None:
-                    tm_score = calculate_tm_score(
-                        tmp.name, kwargs["ref_pdb_pth"],
-                        tmalign_path=self.ttt_cfg.tmalign_path
-                    )
-                    eval_step_metric_dict['tm_score'] = tm_score
+        tm_score = None
+        lddt = None
+        if correct_pdb_path is not None:
+            if self._ttt_temp_pdb_path is None:
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pdb') as tmp_file:
+                    self._ttt_temp_pdb_path = Path(tmp_file.name)
+            
+            pdb_str_to_write = pdb_str[0] if isinstance(pdb_str, list) else pdb_str
+            with open(self._ttt_temp_pdb_path, 'w', buffering=8192) as f:
+                f.write(pdb_str_to_write)
+            
+            tm_score = calculate_tm_score(self._ttt_temp_pdb_path, correct_pdb_path)
+            lddt = lddt_score(correct_pdb_path, self._ttt_temp_pdb_path)
 
-        # Store predictions
-        eval_step_preds = {'pdb': pdb_str}
-        eval_step_metric_dict['plddt'] = plddt
+        eval_step_preds = {"pdb": pdb_str}
+        eval_step_metric_dict = {
+            **base_metrics,
+            "plddt": plddt,
+            "tm_score": tm_score,
+            "lddt": lddt,
+        }
         confidence = plddt
 
         return eval_step_preds, eval_step_metric_dict, confidence
