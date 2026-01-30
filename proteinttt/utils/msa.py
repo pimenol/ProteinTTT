@@ -1,11 +1,16 @@
 import hashlib
 from pathlib import Path
 from Bio import SeqIO
-from typing import Optional, Union
+from typing import Optional
 from proteinttt.utils.boltz1_mmseqs2 import run_mmseqs2
 
 
-def process_msa_seq(seq: str, replace_inserstions: Optional[str] = None):
+def process_msa_seq(seq: str, replace_inserstions: Optional[str] = None, delete_lowercase: bool = True) -> str:
+    if delete_lowercase:
+        for char in seq:
+            if char.islower():
+                seq = seq.replace(char, "")
+                
     seq = seq.upper()
     seq = seq.replace(".", "-")
     if replace_inserstions is not None:
@@ -13,10 +18,10 @@ def process_msa_seq(seq: str, replace_inserstions: Optional[str] = None):
     return seq
 
 
-def read_msa(pth: Path, replace_inserstions: Optional[str] = None) -> list[str]:
+def read_msa(pth: Path, replace_inserstions: Optional[str] = None, delete_lowercase: bool = True) -> list[str]:
     """Reads an .a2m MSA file and returns a list of sequences."""
     msa = [
-        process_msa_seq(str(s.seq), replace_inserstions)
+        process_msa_seq(str(s.seq), replace_inserstions, delete_lowercase)
         for s in SeqIO.parse(pth, "fasta")
     ]
     return msa
@@ -29,8 +34,8 @@ class MSAServer:
     Boltz-1/OpenFold code (https://github.com/jwohlwend/boltz/blob/main/src/boltz/data/msa/mmseqs2.py).
     """
 
-    def __init__(self, cache_dir: Union[Path, str]):
-        self.cache_dir = Path(cache_dir)
+    def __init__(self, cache_dir: Path):
+        self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def get(self, seq: str, seq_id: Optional[str] = None) -> Path:
