@@ -65,9 +65,32 @@ class ESMFoldTTT(TTTModule, ESMFold):
     def _ttt_predict_logits(
         self, batch: torch.Tensor, start_indices: torch.Tensor = None, **kwargs
     ) -> torch.Tensor:
+        # Move batch to the same device as the model
+        device = next(self.esm.parameters()).device
+        batch = batch.to(device)
         return self.esm(batch)[
             "logits"
         ]  # [bs, seq_len] -> [bs, seq_len, vocab_size]
+
+    def _ttt_get_representation(
+        self, x: torch.Tensor, **kwargs
+    ) -> torch.Tensor:
+        with torch.no_grad():
+            # Move input to the same device as the model
+            device = next(self.esm.parameters()).device
+            x = x.to(device)
+            
+            esm_output = self.esm(x, repr_layers=[self.esm.num_layers])
+            representations = esm_output["representations"][self.esm.num_layers]
+            non_special_tokens = self._ttt_get_non_special_tokens()
+            non_special_mask = torch.isin(
+                x[0], torch.tensor(non_special_tokens, device=device)
+            )
+            if non_special_mask.sum() > 0:
+                pooled = representations[0, non_special_mask].mean(dim=0)
+            else:
+                pooled = representations[0].mean(dim=0)
+        return pooled
 
     def ttt_reset(self) -> None:
         """Reset model and cleanup temporary files."""
@@ -85,6 +108,7 @@ class ESMFoldTTT(TTTModule, ESMFold):
         all_log_probs: torch.Tensor,
         seq: str,
         msa_pth: Path,
+        x: T.Optional[torch.Tensor] = None,
         correct_pdb_path: T.Optional[Path] = None,
         **kwargs,
     ) -> T.Tuple[dict, dict, T.Optional[float]]:
@@ -95,6 +119,7 @@ class ESMFoldTTT(TTTModule, ESMFold):
             all_log_probs=all_log_probs,
             seq=seq,
             msa_pth=msa_pth,
+            x=x,
             **kwargs,
         )
 

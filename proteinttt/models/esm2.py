@@ -69,3 +69,23 @@ class ESM2TTT(TTTModule, ESM2):
         return self(batch)[
             "logits"
         ]  # [bs, seq_len] -> [bs, seq_len, vocab_size]
+
+    def _ttt_get_representation(
+        self, x: torch.Tensor, **kwargs
+    ) -> torch.Tensor:
+        with torch.no_grad():
+            # Move input to the same device as the model
+            device = next(self.parameters()).device
+            x = x.to(device)
+            
+            output = self(x, repr_layers=[self.num_layers])
+            representations = output["representations"][self.num_layers]
+            non_special_tokens = self._ttt_get_non_special_tokens()
+            non_special_mask = torch.isin(
+                x[0], torch.tensor(non_special_tokens, device=device)
+            )
+            if non_special_mask.sum() > 0:
+                pooled = representations[0, non_special_mask].mean(dim=0)
+            else:
+                pooled = representations[0].mean(dim=0)
+        return pooled

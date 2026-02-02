@@ -108,6 +108,18 @@ class TTTConfig:
     lr_warmup_steps: int = 0  
     lr_min: float = 0.0
 
+    # FGR (Fidelity-Gain Ratio) stopping criterion parameters
+    fgr_enabled: bool = False
+    fgr_drift_threshold: float = 0.1
+    fgr_ratio_threshold: float = 0.0
+    fgr_early_stopping: bool = False
+
+    fgr_ema_decay: float = 0.5
+    fgr_warmup_steps: int = 5
+    fgr_patience: int = 3
+    fgr_use_cumulative: bool = True
+    fgr_min_drift_delta: float = 0
+
     @classmethod
     def from_yaml(cls, yaml_path: T.Union[str, Path]) -> "TTTConfig":
         """Load TTTConfig from a YAML file using OmegaConf.
@@ -256,6 +268,18 @@ class TTTModule(torch.nn.Module, ABC):
         if self.ttt_cfg.initial_state_reset:
             self._ttt_initial_state = self._ttt_get_state()
 
+        # FGR state tracking
+        self._fgr_anchor_representation: T.Optional[torch.Tensor] = None  # z_0
+        self._fgr_prev_loss: T.Optional[float] = None  # L(x; θ_{t-1})
+        self._fgr_prev_drift: T.Optional[float] = None  # D_{t-1}
+        
+        # Enhanced FGR tracking for stability
+        self._fgr_initial_loss: T.Optional[float] = None  
+        self._fgr_ema_loss: T.Optional[float] = None 
+        self._fgr_ema_drift: T.Optional[float] = None 
+        self._fgr_cumulative_loss_gain: float = 0.0
+        self._fgr_negative_ratio_count: int = 0
+
     @classmethod
     def ttt_from_pretrained(
         cls,
@@ -347,6 +371,9 @@ class TTTModule(torch.nn.Module, ABC):
         optimizer = self._ttt_get_optimizer(parameters)
         optimizer.zero_grad()
 
+        # Reset FGR state for new TTT run
+        self._ttt_reset_fgr_state()
+
         # Initialize dictionaries to store results and metrics each TTT step
         df = []
         ttt_step_data = defaultdict(dict)
@@ -425,6 +452,7 @@ class TTTModule(torch.nn.Module, ABC):
                 # Evaluate TTT step
                 if self.ttt_cfg.eval_each_step:
                     eval_step_start_time = time.time()
+                    x_for_fgr = x[0:1, :] if x.dim() == 2 else x
                     (
                         eval_step_preds,
                         eval_step_metric_dict,
@@ -436,6 +464,7 @@ class TTTModule(torch.nn.Module, ABC):
                         all_log_probs=all_log_probs,
                         seq=seq,
                         msa_pth=msa_pth,
+                        x=x_for_fgr,
                         **kwargs,
                     )
                     eval_step_time = time.time() - eval_step_start_time
@@ -489,6 +518,27 @@ class TTTModule(torch.nn.Module, ABC):
                             f"Early stopping at step {step} with perplexity {perplexity}"
                         )
                         break
+
+                # # Early stopping - FGR criterion
+                # if self.ttt_cfg.fgr_enabled and self.ttt_cfg.fgr_early_stopping:
+                #     fgr_stop_drift = eval_step_metric_dict.get("fgr_stop_drift", False)
+                #     fgr_stop_ratio = eval_step_metric_dict.get("fgr_stop_ratio", False)
+                    
+                #     if fgr_stop_drift:
+                #         drift_val = eval_step_metric_dict.get("fgr_drift", "N/A")
+                #         self.ttt_logger.info(
+                #             f"FGR early stopping at step {step // self.ttt_cfg.ags}: "
+                #             f"semantic drift ({drift_val:.4f}) exceeded threshold ({self.ttt_cfg.fgr_drift_threshold})"
+                #         )
+                #         break
+                    
+                #     if fgr_stop_ratio and step > 0:
+                #         ratio_val = eval_step_metric_dict.get("fgr_ratio", "N/A")
+                #         self.ttt_logger.info(
+                #             f"FGR early stopping at step {step // self.ttt_cfg.ags}: "
+                #             f"efficiency ratio ({ratio_val:.4f}) below threshold ({self.ttt_cfg.fgr_ratio_threshold})"
+                #         )
+                #         break
 
             # Last step is just for logging
             if step == self.ttt_cfg.steps * self.ttt_cfg.ags:
@@ -679,7 +729,193 @@ class TTTModule(torch.nn.Module, ABC):
             "Subclass must implement _ttt_token_to_str method"
         )
 
-    def _ttt_get_trainable_modules(self) -> T.List[torch.nn.Module]:
+    def _ttt_get_representation(
+        self, x: torch.Tensor, **kwargs
+    ) -> torch.Tensor:
+        """Extract aggregated latent representation for FGR computation.
+
+        This method extracts the latent representation that will be used as the
+        semantic anchor (z_0) and for computing semantic drift. Child classes
+        should override this to provide model-specific representation extraction.
+
+        The default implementation returns mean-pooled logits, but models should
+        ideally return representations from earlier layers for better semantic representation.
+
+        Args:
+            x: Input sequence tensor [1, sequence_length]
+            **kwargs: Additional arguments passed to model forward pass
+
+        Returns:
+            Aggregated representation tensor [hidden_dim]
+        """
+        with torch.no_grad():
+            device = next(self.parameters()).device
+            x = x.to(device)
+            
+            logits = self._ttt_predict_logits(x, **kwargs)
+            representation = logits.mean(dim=1).squeeze(0)
+        return representation
+
+    def _ttt_reset_fgr_state(self) -> None:
+        """Reset all FGR state for a new TTT run."""
+        self._fgr_anchor_representation = None
+        self._fgr_prev_loss = None
+        self._fgr_prev_drift = None
+        
+        # Reset enhanced FGR tracking
+        self._fgr_initial_loss = None
+        self._fgr_ema_loss = None
+        self._fgr_ema_drift = None
+        self._fgr_cumulative_loss_gain = 0.0
+        self._fgr_negative_ratio_count = 0
+
+    def _ttt_compute_fgr_metrics(
+        self,
+        step: int,
+        loss: T.Optional[float],
+        perplexity: T.Optional[float],
+        x: torch.Tensor,
+        **kwargs,
+    ) -> dict[str, T.Optional[float]]:
+        """Compute enhanced Fidelity-Gain Ratio metrics for stopping criterion.
+        
+        Args:
+            step: Current training step
+            loss: Training loss at current step
+            perplexity: Perplexity at current step
+            x: Input sequence tensor [1, sequence_length]
+
+        Returns:
+            Dictionary containing FGR metrics:
+                - fgr_loss_delta: Instantaneous change in loss (step-wise)
+                - fgr_drift: Cosine dissimilarity from anchor (0 to 2)
+                - fgr_drift_delta: Change in drift from previous step
+                - fgr_ratio: Step-wise ratio of loss gain to drift cost
+                - fgr_ratio_cumulative: Cumulative ratio (total_gain / total_drift)
+                - fgr_ema_loss: EMA smoothed loss
+                - fgr_ema_ratio: Ratio using EMA smoothed values
+                - fgr_stop_drift: Whether drift threshold exceeded
+                - fgr_stop_ratio: Whether efficiency collapsed (with patience)
+                - fgr_negative_count: Consecutive negative ratio count
+        """
+        if not self.ttt_cfg.fgr_enabled:
+            return {}
+
+        metrics: dict[str, T.Any] = {
+            "fgr_ratio": None,
+            "fgr_loss_delta": None,
+            "fgr_drift_delta": None,
+
+            "fgr_ratio_cumulative": None,
+            "fgr_drift": None,
+            "_fgr_cumulative_loss_gain": None,
+
+            "fgr_ema_ratio": None,
+            # "fgr_stop_drift": False,
+            # "fgr_stop_ratio": False,
+            # "fgr_negative_count": 0,
+            
+        }
+
+        # Get current representation
+        z_t = self._ttt_get_representation(x, **kwargs)
+
+        if step == 0:
+            self._fgr_anchor_representation = z_t.clone()
+            self._fgr_prev_loss = perplexity
+            self._fgr_prev_drift = 0.0
+            self._fgr_initial_loss = None
+            self._fgr_ema_loss = None
+            self._fgr_ema_drift = 0.0
+            self._fgr_cumulative_loss_gain = 0.0
+            self._fgr_negative_ratio_count = 0
+            
+            metrics["fgr_drift"] = 0.0
+            # metrics["fgr_ema_loss"] = perplexity
+            return metrics
+
+        z_0 = self._fgr_anchor_representation
+        
+        # Capture initial loss at first step with valid loss (for cumulative ratio)
+        if self._fgr_initial_loss is None and perplexity is not None:
+            self._fgr_initial_loss = perplexity
+        
+        cos_sim = torch.nn.functional.cosine_similarity(
+            z_t.unsqueeze(0), z_0.unsqueeze(0)
+        ).item()
+        fgr_drift = abs(1.0 - cos_sim) 
+        fgr_drift_delta = fgr_drift - self._fgr_prev_drift
+        
+        # Compute loss delta
+        fgr_loss_delta = None
+        if perplexity is not None and self._fgr_prev_loss is not None:
+            fgr_loss_delta = perplexity - self._fgr_prev_loss
+        
+        # Update EMA smoothed loss
+        if perplexity is not None:
+            if self._fgr_ema_loss is None:
+                self._fgr_ema_loss = perplexity
+            else:
+                self._fgr_ema_loss = self.ttt_cfg.fgr_ema_decay * self._fgr_ema_loss + (1 - self.ttt_cfg.fgr_ema_decay) * perplexity
+        
+        # # Update EMA smoothed drift rate
+        # abs_drift_delta = abs(fgr_drift_delta)
+        # if self._fgr_ema_drift is None:
+        #     self._fgr_ema_drift = abs_drift_delta
+        # else:
+        #     self._fgr_ema_drift = self.ttt_cfg.fgr_ema_decay * self._fgr_ema_drift + (1 - self.ttt_cfg.fgr_ema_decay) * abs_drift_delta
+        
+        # Compute step-wise ratio with numerical stability
+        fgr_ratio = None
+        if fgr_loss_delta is not None and abs(fgr_drift_delta) > self.ttt_cfg.fgr_min_drift_delta:
+            fgr_ratio = fgr_loss_delta / abs(fgr_drift_delta)
+        
+        # Compute cumulative ratio
+        fgr_ratio_cumulative = None
+        if perplexity is not None and self._fgr_initial_loss is not None:
+            self._fgr_cumulative_loss_gain = perplexity - self._fgr_initial_loss
+            if fgr_drift > self.ttt_cfg.fgr_min_drift_delta:
+                fgr_ratio_cumulative = self._fgr_cumulative_loss_gain / fgr_drift
+        
+        # Compute EMA-smoothed ratio
+        fgr_ema_ratio = None
+        if self._fgr_ema_loss is not None and self._fgr_initial_loss is not None:
+            ema_loss_gain = self._fgr_initial_loss - self._fgr_ema_loss
+            if fgr_drift > self.ttt_cfg.fgr_min_drift_delta:
+                fgr_ema_ratio = ema_loss_gain / fgr_drift
+        
+        if self.ttt_cfg.fgr_use_cumulative:
+            decision_ratio = fgr_ratio_cumulative
+        else:
+            decision_ratio = fgr_ratio
+        
+        # if decision_ratio is not None and decision_ratio < self.ttt_cfg.fgr_ratio_threshold:
+        #     self._fgr_negative_ratio_count += 1
+        # else:
+        #     self._fgr_negative_ratio_count = 0
+        
+        # fgr_stop_drift = fgr_drift > self.ttt_cfg.fgr_drift_threshold
+        
+        # fgr_stop_ratio = (
+        #     step >= self.ttt_cfg.fgr_warmup_steps
+        #     and self._fgr_negative_ratio_count >= self.ttt_cfg.fgr_patience
+        # )
+    
+        self._fgr_prev_loss = perplexity
+        self._fgr_prev_drift = fgr_drift
+
+        metrics["fgr_loss_delta"] = fgr_loss_delta
+        metrics["fgr_drift_delta"] = abs(fgr_drift_delta)
+        metrics["fgr_ratio"] = fgr_ratio
+
+        metrics["fgr_drift"] = fgr_drift
+        metrics["_fgr_cumulative_loss_gain"] = self._fgr_cumulative_loss_gain
+        metrics["fgr_ratio_cumulative"] = fgr_ratio_cumulative
+        metrics["fgr_ema_ratio"] = fgr_ema_ratio
+        
+        return metrics
+
+    def _ttt_get_trainable_modules(self) -> list[torch.nn.Module]:
         """Get list of modules to train.
 
         Note that some parameters in these modules may still be frozen by
@@ -1301,12 +1537,12 @@ class TTTModule(torch.nn.Module, ABC):
         all_log_probs: torch.Tensor,
         seq: str,
         msa_pth: Path,
+        x: T.Optional[torch.Tensor] = None,
         **kwargs,
     ) -> T.Tuple[dict, dict, T.Optional[float]]:
         """Evaluate model during test-time training (e.g., to select the optimal step).
 
-        Base implementation that returns empty dictionaries. Child classes should override
-        this to implement model-specific evaluation.
+        Base implementation computes FGR metrics if enabled.
 
         Args:
             step: Current training step
@@ -1315,12 +1551,27 @@ class TTTModule(torch.nn.Module, ABC):
             all_log_probs: Log probabilities for each token
             seq: Input amino acid sequence
             msa_pth: Path to MSA file
+            x: Input sequence tensor for FGR computation [1, sequence_length]
             **kwargs: Additional arguments passed to model forward pass
 
         Returns:
             tuple containing:
                 - Dictionary of predictions
-                - Dictionary of evaluation metrics
+                - Dictionary of evaluation metrics (includes FGR metrics if enabled)
                 - Optional confidence score
         """
-        return {}, {}, None
+        eval_step_preds = {}
+        eval_step_metrics = {}
+
+        # Compute FGR metrics if enabled and input tensor is available
+        if self.ttt_cfg.fgr_enabled and x is not None:
+            fgr_metrics = self._ttt_compute_fgr_metrics(
+                step=step,
+                loss=loss,
+                perplexity=perplexity,
+                x=x,
+                **kwargs,
+            )
+            eval_step_metrics.update(fgr_metrics)
+
+        return eval_step_preds, eval_step_metrics, None
