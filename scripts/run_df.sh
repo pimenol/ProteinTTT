@@ -14,8 +14,7 @@ conda activate proteinttt2
 
 cd /scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT || exit 1
 export PYTHONPATH="${PYTHONPATH}:/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT"
-DF_PATH=$1
 
-python3 ./scripts/run_df.py --df_path $DF_PATH
+python3 ./scripts/run_df.py --config ./scripts/config.yaml
 
 echo "Job finished successfully."
