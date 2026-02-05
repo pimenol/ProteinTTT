@@ -224,7 +224,12 @@ def extract_sequence_from_pdb(pdb_path, chain=None):
         print(f"Error parsing PDB {pdb_path}: {e}")
         return None
     
-    model = structure[0]
+    # Some PDBs may parse with no models; handle gracefully.
+    try:
+        model = structure[0]
+    except KeyError:
+        print(f"Error parsing PDB {pdb_path}: no models found.")
+        return None
     
     # If chain is specified, extract only that chain
     if chain is not None:
