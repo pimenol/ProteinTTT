@@ -363,6 +363,9 @@ class TTTModule(torch.nn.Module, ABC):
         device = next(self.parameters()).device
         non_blocking = device.type == "cuda"
         cached_trainable_params = [p for p in self.parameters() if p.requires_grad]
+        
+        # Move tokenized sequence to device
+        x = x.to(device)
 
         # Setup LR scheduler 
         scheduler = None
