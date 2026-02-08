@@ -1,7 +1,7 @@
 import hashlib
 from pathlib import Path
 from Bio import SeqIO
-from typing import Optional
+from typing import Optional, Union
 from proteinttt.utils.boltz1_mmseqs2 import run_mmseqs2
 
 
