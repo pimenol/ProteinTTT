@@ -34,8 +34,8 @@ class MSAServer:
     Boltz-1/OpenFold code (https://github.com/jwohlwend/boltz/blob/main/src/boltz/data/msa/mmseqs2.py).
     """
 
-    def __init__(self, cache_dir: Path):
-        self.cache_dir = cache_dir
+    def __init__(self, cache_dir: Union[Path, str]):
+        self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def get(self, seq: str, seq_id: Optional[str] = None) -> Path:
