@@ -1,0 +1,26 @@
+Running all proteins sequentially
+Job ID: 3820424
+Config: fgr_proteingym_config.yaml
+2026-02-02 17:22:31,003 [INFO] ============================================================
+2026-02-02 17:22:31,005 [INFO] FGR ProteinGym Fitness Prediction Analysis
+2026-02-02 17:22:31,005 [INFO] ============================================================
+2026-02-02 17:22:31,005 [INFO] Config: fgr_proteingym_config.yaml
+2026-02-02 17:22:31,005 [INFO] Output: /scratch/project/open-35-8/pimenol1/ProteinTTT_merge/ProteinTTT/results/fgr_proteingym
+2026-02-02 17:22:31,033 [INFO] Loaded 945 proteins from reference file
+2026-02-02 17:22:31,040 [INFO] Selected 1 proteins (max length: 400)
+2026-02-02 17:22:31,040 [INFO]   - urn:mavedb:00000105-a-1: length=221, mutations=517468
+2026-02-02 17:22:31,040 [INFO] 
+============================================================
+2026-02-02 17:22:31,040 [INFO] Protein 1/1
+2026-02-02 17:22:31,040 [INFO] ============================================================
+2026-02-02 17:22:31,040 [INFO] Processing urn:mavedb:00000105-a-1 (length: 221)
+2026-02-02 17:22:32,446 [INFO] Using 'DMS_score' as fitness column, 'mutant' as mutation column, 1045 mutations
+2026-02-02 17:22:32,447 [INFO] Using device: cuda
+2026-02-02 17:22:32,447 [INFO] Loading model: esm2_t33_650M_UR50D
+2026-02-02 17:22:43,899 [INFO] Running ProteinTTT for 30 steps...
+2026-02-02 17:22:43,911 [ERROR] Error during TTT for urn:mavedb:00000105-a-1: '<' not supported between instances of 'str' and 'float'
+2026-02-02 17:22:43,916 [INFO] 
+============================================================
+2026-02-02 17:22:43,916 [INFO] Analysis complete!
+2026-02-02 17:22:43,916 [INFO] ============================================================
+Job completed at Mon Feb  2 17:22:44 CET 2026

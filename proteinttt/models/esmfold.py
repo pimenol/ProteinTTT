@@ -112,16 +112,6 @@ class ESMFoldTTT(TTTModule, ESMFold):
         correct_pdb_path: T.Optional[Path] = None,
         **kwargs,
     ) -> T.Tuple[dict, dict, T.Optional[float]]:
-        _, base_metrics, _ = super()._ttt_eval_step(
-            step=step,
-            loss=loss,
-            perplexity=perplexity,
-            all_log_probs=all_log_probs,
-            seq=seq,
-            msa_pth=msa_pth,
-            x=x,
-            **kwargs,
-        )
 
         # Predict structure
         with torch.no_grad():
@@ -141,7 +131,8 @@ class ESMFoldTTT(TTTModule, ESMFold):
             with open(self._ttt_temp_pdb_path, 'w', buffering=8192) as f:
                 f.write(pdb_str_to_write)
             
-            tm_score = calculate_tm_score(self._ttt_temp_pdb_path, correct_pdb_path)
+            if self.ttt_cfg.tmalign_path is not None:
+                tm_score = calculate_tm_score(self._ttt_temp_pdb_path, correct_pdb_path)
             lddt = lddt_score(correct_pdb_path, self._ttt_temp_pdb_path)
 
         eval_step_preds = {"pdb": pdb_str}

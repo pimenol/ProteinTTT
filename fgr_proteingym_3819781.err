@@ -1,0 +1,101 @@
+<frozen importlib._bootstrap>:488: Warning: OpenSSL 3's legacy provider failed to load. Legacy algorithms will not be available. If you need those algorithms, check your OpenSSL configuration.
+/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/lightning_lite/__init__.py:29: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  __import__("pkg_resources").declare_namespace(__name__)
+/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'repr' attribute with value False was provided to the `Field()` function, which has no effect in the context it was used. 'repr' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
+  warnings.warn(
+/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'frozen' attribute with value True was provided to the `Field()` function, which has no effect in the context it was used. 'frozen' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
+  warnings.warn(
+Processing proteins:   0%|          | 0/10 [00:00<?, ?it/s]Traceback (most recent call last):
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/scripts/run_fgr_proteingym.py", line 142, in main
+    result = model.ttt(sequence)
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/utils/torch.py", line 37, in wrapper
+    result = func(self, *args, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/base.py", line 531, in ttt
+    logits = self._ttt_predict_logits(
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/models/esmfold.py", line 71, in _ttt_predict_logits
+    return self.esm(batch)[
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1194, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/esm/model/esm2.py", line 112, in forward
+    x, attn = layer(
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1194, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/esm/modules.py", line 125, in forward
+    x, attn = self.self_attn(
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1194, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/esm/multihead_attention.py", line 379, in forward
+    attn_weights_float = utils_softmax(attn_weights, dim=-1, onnx_trace=self.onnx_trace)
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/esm/multihead_attention.py", line 22, in utils_softmax
+    return F.softmax(x, dim=dim, dtype=torch.float32)
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/nn/functional.py", line 1843, in softmax
+    ret = input.softmax(dim, dtype=dtype)
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 446.00 MiB (GPU 0; 39.49 GiB total capacity; 37.67 GiB already allocated; 90.50 MiB free; 38.52 GiB reserved in total by PyTorch) If reserved memory is >> allocated memory try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF
+Processing proteins:  10%|█         | 1/10 [02:25<21:52, 145.80s/it]Processing proteins:  20%|██        | 2/10 [07:03<29:47, 223.45s/it]Processing proteins:  30%|███       | 3/10 [09:46<22:51, 195.88s/it]Traceback (most recent call last):
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/scripts/run_fgr_proteingym.py", line 142, in main
+    result = model.ttt(sequence)
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/utils/torch.py", line 37, in wrapper
+    result = func(self, *args, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/base.py", line 552, in ttt
+    loss.backward()
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/_tensor.py", line 488, in backward
+    torch.autograd.backward(
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/autograd/__init__.py", line 197, in backward
+    Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 198.00 MiB (GPU 0; 39.49 GiB total capacity; 36.85 GiB already allocated; 74.50 MiB free; 38.53 GiB reserved in total by PyTorch) If reserved memory is >> allocated memory try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF
+Processing proteins:  40%|████      | 4/10 [10:45<14:10, 141.72s/it]Traceback (most recent call last):
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/scripts/run_fgr_proteingym.py", line 142, in main
+    result = model.ttt(sequence)
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/utils/torch.py", line 37, in wrapper
+    result = func(self, *args, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/base.py", line 552, in ttt
+    loss.backward()
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/_tensor.py", line 488, in backward
+    torch.autograd.backward(
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/autograd/__init__.py", line 197, in backward
+    Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 198.00 MiB (GPU 0; 39.49 GiB total capacity; 36.65 GiB already allocated; 174.50 MiB free; 38.43 GiB reserved in total by PyTorch) If reserved memory is >> allocated memory try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF
+Processing proteins:  50%|█████     | 5/10 [11:44<09:19, 111.91s/it]Traceback (most recent call last):
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/scripts/run_fgr_proteingym.py", line 142, in main
+    result = model.ttt(sequence)
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/utils/torch.py", line 37, in wrapper
+    result = func(self, *args, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/base.py", line 531, in ttt
+    logits = self._ttt_predict_logits(
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/models/esmfold.py", line 71, in _ttt_predict_logits
+    return self.esm(batch)[
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1194, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/esm/model/esm2.py", line 112, in forward
+    x, attn = layer(
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1194, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/esm/modules.py", line 125, in forward
+    x, attn = self.self_attn(
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1194, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/esm/multihead_attention.py", line 380, in forward
+    attn_weights = attn_weights_float.type_as(attn_weights)
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 178.00 MiB (GPU 0; 39.49 GiB total capacity; 37.96 GiB already allocated; 22.50 MiB free; 38.58 GiB reserved in total by PyTorch) If reserved memory is >> allocated memory try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF
+Processing proteins:  60%|██████    | 6/10 [13:36<07:27, 111.99s/it]Processing proteins:  70%|███████   | 7/10 [22:10<12:10, 243.43s/it]Traceback (most recent call last):
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/scripts/run_fgr_proteingym.py", line 142, in main
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/utils/torch.py", line 37, in wrapper
+    result = func(self, *args, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/base.py", line 531, in ttt
+    logits = self._ttt_predict_logits(
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/models/esmfold.py", line 71, in _ttt_predict_logits
+    return self.esm(batch)[
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1194, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/esm/model/esm2.py", line 112, in forward
+    x, attn = layer(
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1194, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/esm/modules.py", line 125, in forward
+    x, attn = self.self_attn(
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1194, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt2/lib/python3.10/site-packages/esm/multihead_attention.py", line 380, in forward
+    attn_weights = attn_weights_float.type_as(attn_weights)
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 182.00 MiB (GPU 0; 39.49 GiB total capacity; 35.90 GiB already allocated; 106.50 MiB free; 38.50 GiB reserved in total by PyTorch) If reserved memory is >> allocated memory try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF
+Processing proteins:  80%|████████  | 8/10 [24:09<06:47, 203.88s/it]Processing proteins:  90%|█████████ | 9/10 [29:17<03:56, 236.49s/it]slurmstepd: error: *** JOB 3819781 ON acn32 CANCELLED AT 2026-02-02T16:27:13 ***

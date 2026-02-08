@@ -1,0 +1,21 @@
+/scratch/project/open-35-8/pimenol1/ProteinTTT_merge/ProteinTTT/proteinttt/__init__.py
+Loading ESMFold model...
+Running baseline inference (without TTT)...
+Baseline pLDDT (without TTT): 38.43
+Applying TTT...
+2026-02-02 12:29:01,645 | INFO | step: 0, accumulated_step: 0, loss: None, perplexity: None, ttt_step_time: 0.00000, score_seq_time: 0.00000, eval_step_time: 1.75302, lr: 0.00040, plddt: 38.43030, tm_score: None, lddt: None
+2026-02-02 12:29:04,008 | INFO | step: 1, accumulated_step: 4, loss: 2.54688, perplexity: None, ttt_step_time: 0.61411, score_seq_time: 0.00000, eval_step_time: 1.74884, lr: 0.00040, plddt: 38.02519, tm_score: None, lddt: None
+2026-02-02 12:29:06,686 | INFO | step: 2, accumulated_step: 8, loss: 2.51758, perplexity: None, ttt_step_time: 0.54172, score_seq_time: 0.00000, eval_step_time: 2.13536, lr: 0.00040, plddt: 34.45072, tm_score: None, lddt: None
+2026-02-02 12:29:08,975 | INFO | step: 3, accumulated_step: 12, loss: 2.48047, perplexity: None, ttt_step_time: 0.54262, score_seq_time: 0.00000, eval_step_time: 1.74682, lr: 0.00040, plddt: 37.63688, tm_score: None, lddt: None
+2026-02-02 12:29:11,345 | INFO | step: 4, accumulated_step: 16, loss: 2.17578, perplexity: None, ttt_step_time: 0.54338, score_seq_time: 0.00000, eval_step_time: 1.74719, lr: 0.00040, plddt: 79.16154, tm_score: None, lddt: None
+2026-02-02 12:29:13,640 | INFO | step: 5, accumulated_step: 20, loss: 2.39453, perplexity: None, ttt_step_time: 0.54617, score_seq_time: 0.00000, eval_step_time: 1.74823, lr: 0.00040, plddt: 37.41709, tm_score: None, lddt: None
+2026-02-02 12:29:15,934 | INFO | step: 6, accumulated_step: 24, loss: 2.46875, perplexity: None, ttt_step_time: 0.54591, score_seq_time: 0.00000, eval_step_time: 1.74822, lr: 0.00040, plddt: 66.35778, tm_score: None, lddt: None
+2026-02-02 12:29:18,227 | INFO | step: 7, accumulated_step: 28, loss: 2.26758, perplexity: None, ttt_step_time: 0.54567, score_seq_time: 0.00000, eval_step_time: 1.74742, lr: 0.00040, plddt: 78.22101, tm_score: None, lddt: None
+2026-02-02 12:29:20,520 | INFO | step: 8, accumulated_step: 32, loss: 1.86914, perplexity: None, ttt_step_time: 0.54522, score_seq_time: 0.00000, eval_step_time: 1.74751, lr: 0.00040, plddt: 39.90771, tm_score: None, lddt: None
+2026-02-02 12:29:22,815 | INFO | step: 9, accumulated_step: 36, loss: 1.83691, perplexity: None, ttt_step_time: 0.54540, score_seq_time: 0.00000, eval_step_time: 1.74851, lr: 0.00040, plddt: 76.16651, tm_score: None, lddt: None
+2026-02-02 12:29:25,109 | INFO | step: 10, accumulated_step: 40, loss: 1.78125, perplexity: None, ttt_step_time: 0.54513, score_seq_time: 0.00000, eval_step_time: 1.74873, lr: 0.00040, plddt: 44.24146, tm_score: None, lddt: None
+Running inference after TTT...
+TTT pLDDT (with TTT): 79.16
+Improvement ratio: 2.06x
+✓ TEST PASSED: pLDDT improved 2.06x (>= 2x required)
+Test finished successfully.

@@ -1,0 +1,50 @@
+# FGR ProteinGym Fitness Prediction Configuration
+# Analyzes how FGR metrics work for fitness prediction using ESM2 + ProteinTTT
+
+# Paths - Using ProteinGym data
+data_folder: "/scratch/project/open-35-8/data/proteingym/.cache/ProteinGym"
+reference_file: "/scratch/project/open-35-8/pimenol1/ProteinTTT/MaveDB/data/ProteinGym/reference_files/DMS_substitutions.csv"  # absolute path
+dms_data_folder: "DMS_ProteinGym_substitutions"  # relative to data_folder
+
+# Output settings
+output_dir: "/scratch/project/open-35-8/pimenol1/ProteinTTT_merge/ProteinTTT/results/fgr_proteingym"
+
+# Protein selection
+max_sequence_length: 400
+num_proteins: 1
+# Optionally specify specific DMS_ids to run (leave empty to auto-select)
+# Good candidates with length < 400:
+# - urn:mavedb:00000044-a-1: SARS-CoV-2 RBD (201 aa, 7638 mutations)
+# - urn:mavedb:00000003-b-1: BRCA1 RING domain (303 aa, 15647 mutations)
+# - urn:mavedb:00000067-a-1: TECR (308 aa, 4050 mutations)
+# - urn:mavedb:00000037-a-1: Ubiquitin (381 aa, 1195 mutations)
+# - urn:mavedb:00000065-a-1: NCS1 (191 aa, 3180 mutations)
+# - urn:mavedb:00000077-a-1: C. cellulolyticum cohesin (162 aa, 2986 mutations)
+# - urn:mavedb:00000077-b-1: C. thermocellum cohesin (152 aa, 2777 mutations)
+# - urn:mavedb:00000036-a-1: LDLRAP1 (309 aa, 5814 mutations)
+# - urn:mavedb:00000076-a-1: Fis1 tail anchor (155 aa, 507 mutations)
+# - urn:mavedb:00000079-a-1: PyKS (392 aa, 5451 mutations)
+specific_dms_ids: []
+
+# Model settings
+model_checkpoint: "esm2_t33_650M_UR50D"
+scoring_strategy: "masked-marginals"
+
+# ProteinTTT settings
+ttt:
+  steps: 30
+  lr: 0.00004  # 4e-5
+  ags: 4  # accumulation gradient steps
+  batch_size: 4
+  loss_kind: "unnormalized_cross_entropy"
+  score_seq_kind: "pseudo_perplexity"
+  score_seq_steps_list: null  # Score at all steps
+  eval_each_step: true
+  fgr_enabled: true
+  fgr_drift_threshold: 0.1
+  fgr_ratio_threshold: 0.0
+  fgr_early_stopping: false  # Don't stop early - we want all 30 steps
+  seed: 42
+
+# Logging
+log_level: "INFO"

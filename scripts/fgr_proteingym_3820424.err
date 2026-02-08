@@ -1,0 +1,15 @@
+<frozen importlib._bootstrap>:488: Warning: OpenSSL 3's legacy provider failed to load. Legacy algorithms will not be available. If you need those algorithms, check your OpenSSL configuration.
+<frozen importlib._bootstrap>:488: Warning: OpenSSL 3's legacy provider failed to load. Legacy algorithms will not be available. If you need those algorithms, check your OpenSSL configuration.
+<frozen importlib._bootstrap>:488: Warning: OpenSSL 3's legacy provider failed to load. Legacy algorithms will not be available. If you need those algorithms, check your OpenSSL configuration.
+Traceback (most recent call last):
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT_merge/ProteinTTT/scripts/run_fgr_proteingym.py", line 417, in run_protein_experiment
+    ttt_result = model.ttt(sequence, return_logs=True)
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/utils/torch.py", line 37, in wrapper
+    result = func(self, *args, **kwargs)
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/base.py", line 346, in ttt
+    optimizer = self._ttt_get_optimizer(parameters)
+  File "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/proteinttt/base.py", line 974, in _ttt_get_optimizer
+    optimizer = torch.optim.SGD(
+  File "/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt/lib/python3.10/site-packages/torch/optim/sgd.py", line 96, in __init__
+    if lr is not required and lr < 0.0:
+TypeError: '<' not supported between instances of 'str' and 'float'
