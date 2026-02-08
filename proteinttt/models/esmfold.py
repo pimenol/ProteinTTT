@@ -131,13 +131,11 @@ class ESMFoldTTT(TTTModule, ESMFold):
             with open(self._ttt_temp_pdb_path, 'w', buffering=8192) as f:
                 f.write(pdb_str_to_write)
             
-            if self.ttt_cfg.tmalign_path is not None:
-                tm_score = calculate_tm_score(self._ttt_temp_pdb_path, correct_pdb_path)
+            tm_score = calculate_tm_score(self._ttt_temp_pdb_path, correct_pdb_path)
             lddt = lddt_score(correct_pdb_path, self._ttt_temp_pdb_path)
 
         eval_step_preds = {"pdb": pdb_str}
         eval_step_metric_dict = {
-            **base_metrics,
             "plddt": plddt,
             "tm_score": tm_score,
             "lddt": lddt,
