@@ -1,37 +1,11 @@
 import subprocess
 import numpy as np
-from pathlib import Path
 import Bio.PDB as bp
 import biotite.structure.io as bsio
 from proteinttt.utils.fix_pdb import fix_pdb
 
-import subprocess
 import os
-from pathlib import Path
-import numpy as np
-
-AA3_TO_AA1 = {
-    "ALA": "A",
-    "CYS": "C",
-    "ASP": "D",
-    "GLU": "E",
-    "PHE": "F",
-    "GLY": "G",
-    "HIS": "H",
-    "ILE": "I",
-    "LYS": "K",
-    "LEU": "L",
-    "MET": "M",
-    "ASN": "N",
-    "PRO": "P",
-    "GLN": "Q",
-    "ARG": "R",
-    "SER": "S",
-    "THR": "T",
-    "VAL": "V",
-    "TRP": "W",
-    "TYR": "Y",
-}
+from proteinttt.utils.protein import AA3_TO_AA1
 
 
 def calculate_tm_score(
