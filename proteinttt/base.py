@@ -438,6 +438,7 @@ class TTTModule(torch.nn.Module, ABC):
                 )
                 if should_score:
                     score_seq_start_time = time.time()
+                    # Take only the input sequence for scoring
                     seq_to_score = x[0:1, :]
                     all_log_probs, perplexity = self._ttt_score_seq(seq_to_score, **kwargs)
                     score_seq_time = time.time() - score_seq_start_time
@@ -492,9 +493,10 @@ class TTTModule(torch.nn.Module, ABC):
                     ttt_step_time=ttt_step_time,
                     score_seq_time=score_seq_time,
                     eval_step_time=eval_step_time,
-                    lr=optimizer.param_groups[0]["lr"],
                     **eval_step_metric_dict,
                 )
+                if scheduler is not None:
+                    row["lr"] = optimizer.param_groups[0]["lr"]
                 df.append(row)
 
                 # Log
