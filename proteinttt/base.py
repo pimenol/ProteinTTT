@@ -1469,6 +1469,10 @@ class TTTModule(torch.nn.Module, ABC):
             tuple containing:
                 - all_log_probs: Log probabilities for each token in the sequence when masked
                 - scaled_perplexity: Scaled pseudo-perplexity (reliability score between 0 and 1)
+
+        References:
+            Gurev, S., et al. "Evaluating Variant Effect Prediction Across Viruses." 
+            bioRxiv (2025). DOI: 10.1101/2025.08.04.668549
         """
         all_log_probs, perplexity = self._ttt_score_seq_pseudo_perplexity(x, **kwargs)
         scaled_perplexity = (20.0 - perplexity) / 19.0
