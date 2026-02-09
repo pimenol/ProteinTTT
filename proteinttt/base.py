@@ -806,9 +806,14 @@ class TTTModule(torch.nn.Module, ABC):
         """
         state = {}
         trainable_modules = set(self._ttt_get_trainable_modules())
-        for name, module in self.named_children():
-            if module in trainable_modules:
+        
+        if self in trainable_modules:
+            for name, module in self.named_children():
                 state[name] = copy.deepcopy(module)
+        else:
+            for name, module in self.named_children():
+                if module in trainable_modules:
+                    state[name] = copy.deepcopy(module)
         return state
 
     def _ttt_set_state(self, state: T.Any) -> None:
