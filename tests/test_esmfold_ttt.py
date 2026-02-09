@@ -102,6 +102,11 @@ def test_esmfold_ttt_reset():
     
     model = ESMFoldTTT.ttt_from_pretrained(base_model, ttt_cfg=ttt_cfg, esmfold_config=base_model.cfg)
     
+    if len(model._ttt_initial_state) == 0:
+        raise AssertionError(
+            "Initial state is empty!"
+        )
+    
     print(f"Making prediction on test sequence (length {len(TEST_SEQUENCE)}) before TTT")
     with torch.no_grad():
         tokens_before = model._ttt_tokenize(TEST_SEQUENCE).cuda()
