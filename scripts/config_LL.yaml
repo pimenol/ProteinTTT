@@ -1,20 +1,21 @@
 # ProteinTTT Configuration File
 
 # Data settings
-df_path: "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/data/LL"  # REQUIRED: Path to your data directory
+df_path: "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh/data/LL"  # REQUIRED: Path to your data directory
 max_sequence_length: 500
 use_true_pdb: false  # Set to true if you have ground truth PDB files for validation
+use_chain_name: false 
 
 # Test-Time Training settings
 use_msa: false  # Set to true to use MSA (requires .a3m files in df_path/msa/)
 use_gradient_clip: false
 renumber_pdb: false
 # gradient_clip_max_norm: 1.0
-# steps: 30
-# learning_rate: 0.04
-# lora_rank: 64
-# lora_alpha: 128.0
-# ags: 32  # Accumulation gradient steps
+# steps: 100
+# learning_rate: 1e-05
+# lora_rank: 128
+# lora_alpha: 256
+# ags: 32 
 # fgr_enabled: true
 # score_seq_kind: "scaled_pseudo_perplexity"
 

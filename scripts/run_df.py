@@ -14,7 +14,7 @@ import os
 import uuid
 import traceback
 from proteinttt.utils.plots import plot_mean_scores_vs_step
-from proteinttt.utils.fix_pdb import fix_pdb
+from proteinttt.utils.align_pdb_numbering import align_pdb_numbering
 import logging
 import yaml
 
@@ -54,7 +54,7 @@ def main(config):
     PLOT_PATH = base_path / config['output']['plots_dir']
     SAVE_PATH = base_path / config['output']['results_file']
     SUMMARY_PATH = base_path / config['input']['summary_file']
-    CORRECT_PREDICTED_PDB = base_path / config['input']['pdb_dir']
+    CORRECT_PREDICTED_PDB = Path(config['input']['pdb_dir'])
     MSA_PATH = base_path / config['input']['msa_dir']
 
     # Create output directories
@@ -93,7 +93,6 @@ def main(config):
     df = df.query(f"sequence_length <= {max_len}").copy()
     logging.info(f"Loaded {len(df)} sequences (max length: {max_len})")
 
-    # --- Initialize Model ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     base_model = esm.pretrained.esmfold_v0().eval().to(device)
     
@@ -144,9 +143,9 @@ def main(config):
 
         df_logs['pdb'] = df_logs['step'].map(pdb_strings_map)
 
-        desired_columns = ['step', 'accumulated_step', 'loss', 'score_seq_time', 'eval_step_time', 'plddt', 'pdb']
-        existing_columns = [col for col in desired_columns if col in df_logs.columns]
-        df_combined_logs = df_logs[existing_columns]
+        # desired_columns = ['step', 'accumulated_step', 'loss', 'score_seq_time', 'eval_step_time', 'plddt', 'pdb']
+        # existing_columns = [col for col in desired_columns if col in df_logs.columns]
+        df_combined_logs = df_logs
         df_combined_logs.to_csv(Path(LOGS_DIR / f"{pdb_id}_{chain_id}_log.tsv"), sep='\t', index=False)
 
         pdb_before = df_combined_logs['pdb'].iloc[0]
@@ -157,7 +156,7 @@ def main(config):
         pLDDT_before = df_combined_logs['plddt'].iloc[0]
         return pLDDT_before
 
-    def fold_chain(sequence, pdb_id, chain_id, model):
+    def fold_chain(sequence, pdb_id, chain_id, model, true_path=None):
         chunk_size = set_dynamic_chunk_size(model, len(sequence))
         logging.info(f"Processing {pdb_id} (length: {len(sequence)}, chunk_size: {chunk_size})")
         model.ttt_reset()
@@ -166,24 +165,27 @@ def main(config):
                 msa_file = MSA_PATH / f"{pdb_id}_{chain_id}.a3m"
                 if not msa_file.exists():
                     logging.warning(f"MSA file not found: {msa_file}, running without MSA")
-                    df = model.ttt(sequence, return_logs=True)
+                    df = model.ttt(sequence, return_logs=True,correct_pdb_path = true_path)
                 else:
-                    df = model.ttt(sequence, msa_pth=msa_file, return_logs=True)
+                    df = model.ttt(sequence, msa_pth=msa_file, return_logs=True, correct_pdb_path = true_path)
             else:
-                df = model.ttt(sequence, return_logs=True)
+                df = model.ttt(sequence, return_logs=True, correct_pdb_path = true_path)
             
             pLDDT_before = save_log(df, pdb_id, chain_id)
             pLDDT_after = predict_structure(model, sequence, pdb_id, chain_id, out_dir=ESM_TTT_DIR)
+            # model.ttt_reset()
             return pLDDT_before, pLDDT_after
             
         except Exception as e:
-            # Reset model on any error to ensure clean state for next sequence
             logging.error(f"Error in fold_chain for {pdb_id}, resetting model: {e}")
             traceback.print_exc()
             sys.exit(1)
 
     def calculate_metrics(true_path, pred_path, chain_id, path_to_fix_pdb):
-        fix_pdb(true_path, pred_path, chain_id, path_to_fix_pdb)
+        if config['renumber_pdb']:
+            align_pdb_numbering(true_path, pred_path, chain_id, path_to_fix_pdb)
+        else:
+            path_to_fix_pdb = pred_path
 
         tm_score = calculate_tm_score(path_to_fix_pdb, true_path)
         lddt = lddt_score(true_path, path_to_fix_pdb)
@@ -191,12 +193,9 @@ def main(config):
         return tm_score, lddt
 
     # --- Main Processing Loop ---
-    col = 'sequence'
     processed_count = 0
 
     start_total_time = time.time()
-
-    print(f"{SUMMARY_PATH}")
 
     columns_to_add = [f'pLDDT_ProteinTTT', f'lddt_ProteinTTT', f'tm_score_ProteinTTT', 'pLDDT_ESMFold', 'lddt_ESMFold', 'tm_score_ESMFold']
     for col_name in columns_to_add:
@@ -205,15 +204,15 @@ def main(config):
 
     for i, row in df.iterrows():
         start_time = time.time()
-        seq_id = str(row.get("id"))
-        chain_id = str(row.get("chain_id", 'A'))
+        seq_id = str(row.get(config['columns']['id_column']))
+        chain_id = str(row.get(config['columns']['chain_id_column'], 'A'))
 
         if config['use_true_pdb']:
             true_path = CORRECT_PREDICTED_PDB / f"{seq_id}_{chain_id}.pdb"
         else:
             true_path = None
 
-        seq = str(row[col]).strip().upper()
+        seq = str(row[config['columns']['sequence_column']]).strip().upper()
         processed_count += 1
 
         pLDDT_ProteinTTT, tm_score_ProteinTTT, lddt_ProteinTTT = None, None, None
@@ -221,7 +220,7 @@ def main(config):
 
         if not (ESM_TTT_DIR / f"{seq_id}_{chain_id}.pdb").exists():
             try:
-                pLDDT_ESMFold, pLDDT_ProteinTTT = fold_chain(seq, seq_id, chain_id, model=model)
+                pLDDT_ESMFold, pLDDT_ProteinTTT = fold_chain(seq, seq_id, chain_id, model=model, true_path=true_path)
             except Exception as e:
                 df.to_csv(SAVE_PATH, sep="\t", index=False)
                 warnings.warn(f"Error folding chain {seq_id}: {e}")

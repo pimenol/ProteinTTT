@@ -10,7 +10,7 @@
 
 # Activate conda environment
 source "/scratch/project/open-35-8/pimenol1/miniconda3/etc/profile.d/conda.sh"
-conda activate proteinttt2
+conda activate proteinttt
 
 cd /scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT || exit 1
 export PYTHONPATH="${PYTHONPATH}:/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT"
