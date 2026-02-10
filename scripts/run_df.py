@@ -14,7 +14,7 @@ import os
 import uuid
 import traceback
 from proteinttt.utils.plots import plot_mean_scores_vs_step
-from proteinttt.utils.fix_pdb import fix_pdb
+from proteinttt.utils.align_pdb_numbering import align_pdb_numbering
 import logging
 import yaml
 
@@ -93,7 +93,6 @@ def main(config):
     df = df.query(f"sequence_length <= {max_len}").copy()
     logging.info(f"Loaded {len(df)} sequences (max length: {max_len})")
 
-    # --- Initialize Model ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     base_model = esm.pretrained.esmfold_v0().eval().to(device)
     
@@ -174,16 +173,19 @@ def main(config):
             
             pLDDT_before = save_log(df, pdb_id, chain_id)
             pLDDT_after = predict_structure(model, sequence, pdb_id, chain_id, out_dir=ESM_TTT_DIR)
+            # model.ttt_reset()
             return pLDDT_before, pLDDT_after
             
         except Exception as e:
-            # Reset model on any error to ensure clean state for next sequence
             logging.error(f"Error in fold_chain for {pdb_id}, resetting model: {e}")
             traceback.print_exc()
             sys.exit(1)
 
     def calculate_metrics(true_path, pred_path, chain_id, path_to_fix_pdb):
-        fix_pdb(true_path, pred_path, chain_id, path_to_fix_pdb)
+        if config['renumber_pdb']:
+            align_pdb_numbering(true_path, pred_path, chain_id, path_to_fix_pdb)
+        else:
+            path_to_fix_pdb = pred_path
 
         tm_score = calculate_tm_score(path_to_fix_pdb, true_path)
         lddt = lddt_score(true_path, path_to_fix_pdb)

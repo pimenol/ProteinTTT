@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 import Bio.PDB as bp
 import biotite.structure.io as bsio
-from proteinttt.utils.fix_pdb import fix_pdb
+from proteinttt.utils.align_pdb_numbering import align_pdb_numbering
 
 import subprocess
 import os
@@ -194,7 +194,7 @@ def calculate_plddt(pdb_file_path):
 
 def calculate_metrics(true_path, pred_path, chain_id=None, path_to_fix_pdb=None):
     if path_to_fix_pdb is not None and chain_id is not None:
-        fix_pdb(true_path, pred_path, chain_id, path_to_fix_pdb)
+        align_pdb_numbering(true_path, pred_path, chain_id, path_to_fix_pdb)
 
         tm_score = calculate_tm_score(path_to_fix_pdb, true_path)
         lddt = lddt_score(true_path, path_to_fix_pdb)
