@@ -14,11 +14,13 @@
 
 ProteinTTT enables customizing protein language models to one protein at a time for enhanced performance on challenging targets.
 
-## Installation
+## Demo on Hugging Face Spaces 🤗
 
 To try ESMFold+ProteinTTT in your browser (no installation), see the [Hugging Face Space](https://huggingface.co/spaces/pimenova/ProteinTTT).
 
 ![Hugging Face Space](assets/hf_space.png)
+
+## Installation
 
 To install locally, please first install the model you are planning to use with ProteinTTT (for example, if you want to use ESMFold+ProteinTTT, install ESMFold according to the [official guide](https://github.com/facebookresearch/esm?tab=readme-ov-file#quick-start-) first) and then install the `proteinttt` package itself:
 
