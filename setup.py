@@ -12,5 +12,10 @@ setup(
     version="0.0.2",
     packages=find_packages(),
     install_requires=required,
+    extras_require={
+        "dev": [
+            "pytest>=7.0",
+        ],
+    },
     include_package_data=True,
 )

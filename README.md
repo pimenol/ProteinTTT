@@ -18,8 +18,29 @@ ProteinTTT enables customizing protein language models to one protein at a time 
 Please first install the model you are planning to use with ProteinTTT (for example, if you want to use ESMFold+ProteinTTT, install ESMFold according to the [official guide](https://github.com/facebookresearch/esm?tab=readme-ov-file#quick-start-) first) and then install the `proteinttt` package itself:
 
 ```bash
-git clone https://github.com/anton-bushuiev/ProteinTTT && pip install -e ProteinTTT
+git clone https://github.com/anton-bushuiev/ProteinTTT
+cd ProteinTTT
+pip install -e .
 ```
+
+<details>
+<summary><b>Developer installation and running tests</b></summary>
+
+Install in editable mode with dev dependencies (includes `pytest`):
+
+```bash
+git clone https://github.com/anton-bushuiev/ProteinTTT
+cd ProteinTTT
+pip install -e ".[dev]"
+```
+
+Run tests:
+
+```bash
+pytest -ra
+```
+
+</details>
 
 ## Usage
 
