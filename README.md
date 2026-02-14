@@ -4,6 +4,7 @@
 
 [![arXiv badge](https://img.shields.io/badge/arXiv-2411.02109-b31b1b.svg)](https://arxiv.org/abs/2411.02109)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Hugging Face Space](https://img.shields.io/badge/%F0%9F%A4%97%20Space-ProteinTTT-blue)](https://huggingface.co/spaces/pimenova/ProteinTTT)
 
 </div>
 
@@ -14,6 +15,8 @@
 ProteinTTT enables customizing protein language models to one protein at a time for enhanced performance on challenging targets.
 
 ## Installation
+
+To try ESMFold+ProteinTTT in your browser (no installation), see the [Hugging Face Space](https://huggingface.co/spaces/pimenova/ProteinTTT).
 
 Please first install the model you are planning to use with ProteinTTT (for example, if you want to use ESMFold+ProteinTTT, install ESMFold according to the [official guide](https://github.com/facebookresearch/esm?tab=readme-ov-file#quick-start-) first) and then install the `proteinttt` package itself:
 
