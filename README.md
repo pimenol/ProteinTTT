@@ -4,6 +4,7 @@
 
 [![arXiv badge](https://img.shields.io/badge/arXiv-2411.02109-b31b1b.svg)](https://arxiv.org/abs/2411.02109)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Hugging Face Space](https://img.shields.io/badge/%F0%9F%A4%97%20Space-ProteinTTT-blue)](https://huggingface.co/spaces/pimenova/ProteinTTT)
 
 </div>
 
@@ -13,13 +14,40 @@
 
 ProteinTTT enables customizing protein language models to one protein at a time for enhanced performance on challenging targets.
 
+## Demo on Hugging Face Spaces 🤗
+
+To try ESMFold+ProteinTTT in your browser (no installation), see the [Hugging Face Space](https://huggingface.co/spaces/pimenova/ProteinTTT).
+
+![Hugging Face Space](assets/hf_space.png)
+
 ## Installation
 
-Please first install the model you are planning to use with ProteinTTT (for example, if you want to use ESMFold+ProteinTTT, install ESMFold according to the [official guide](https://github.com/facebookresearch/esm?tab=readme-ov-file#quick-start-) first) and then install the `proteinttt` package itself:
+To install locally, please first install the model you are planning to use with ProteinTTT (for example, if you want to use ESMFold+ProteinTTT, install ESMFold according to the [official guide](https://github.com/facebookresearch/esm?tab=readme-ov-file#quick-start-) first) and then install the `proteinttt` package itself:
 
 ```bash
-git clone https://github.com/anton-bushuiev/ProteinTTT && pip install -e ProteinTTT
+git clone https://github.com/anton-bushuiev/ProteinTTT
+cd ProteinTTT
+pip install -e .
 ```
+
+<details>
+<summary><b>Developer installation and running tests</b></summary>
+
+Install in editable mode with dev dependencies (includes `pytest`):
+
+```bash
+git clone https://github.com/anton-bushuiev/ProteinTTT
+cd ProteinTTT
+pip install -e ".[dev]"
+```
+
+Run tests:
+
+```bash
+pytest -ra
+```
+
+</details>
 
 ## Usage
 
@@ -94,7 +122,7 @@ If you use ProteinTTT in your research, please cite the following paper:
 @article{bushuiev2025one,
   title={One protein is all you need},
   author={Bushuiev, Anton and Bushuiev, Roman and Pimenova, Olga and Zadorozhny, Nikola and Samusevich, Raman and Manaskova, Elisabet and Kim, Rachel Seongeun and St{\"a}rk, Hannes and Sedlar, Jiri and Steinegger, Martin and Tom{\'a}{\v{s}} and Sivic, Josef},
-  journal={arXiv preprint arXiv:2411.02109},
+  journal={ICLR 2026 (The Fourteenth International Conference on Learning Representations)},
   url={https://arxiv.org/abs/2411.02109},
   doi={10.48550/arXiv.2411.02109},
   year={2025}
