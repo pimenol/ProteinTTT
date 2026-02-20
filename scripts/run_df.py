@@ -42,6 +42,12 @@ def set_dynamic_chunk_size(model, sequence_length):
 
 def main(config):
     """Main execution function using configuration dictionary."""
+
+    import proteinttt
+    try:
+        print(f"ProteinTTT version: {proteinttt.__version__}")
+    except AttributeError:
+        print("ProteinTTT version: not available")
     
     # Setup paths
     base_path = Path(config['df_path'])
@@ -119,13 +125,19 @@ def main(config):
         esmfold_config=base_model.cfg
     ).to(device)
 
-    def predict_structure(model, sequence, pdb_id, chain_id, out_dir=ESM_TTT_DIR):
+    def get_file_stem(seq_id, chain_id):
+        """Get file stem based on use_chain_name config."""
+        if config.get('use_chain_name', True):
+            return f"{seq_id}_{chain_id}"
+        return str(seq_id)
+
+    def predict_structure(model, sequence, file_stem, out_dir=ESM_TTT_DIR):
         with torch.no_grad():
             pdb_str = model.infer_pdb(sequence)
         if torch.cuda.is_available():
             torch.cuda.synchronize()
 
-        out_path = out_dir / f"{pdb_id}_{chain_id}.pdb"
+        out_path = out_dir / f"{file_stem}.pdb"
         with open(out_path, 'w', buffering=8192) as f:
             f.write(pdb_str)
 
@@ -133,7 +145,7 @@ def main(config):
         pLDDT = float(np.asarray(struct.b_factor, dtype=float).mean())
         return pLDDT
 
-    def save_log(df, pdb_id, chain_id):
+    def save_log(df, file_stem):
         df_logs = df['df'].copy()
         step_data = df['ttt_step_data']
 
@@ -146,23 +158,23 @@ def main(config):
         # desired_columns = ['step', 'accumulated_step', 'loss', 'score_seq_time', 'eval_step_time', 'plddt', 'pdb']
         # existing_columns = [col for col in desired_columns if col in df_logs.columns]
         df_combined_logs = df_logs
-        df_combined_logs.to_csv(Path(LOGS_DIR / f"{pdb_id}_{chain_id}_log.tsv"), sep='\t', index=False)
+        df_combined_logs.to_csv(Path(LOGS_DIR / f"{file_stem}_log.tsv"), sep='\t', index=False)
 
         pdb_before = df_combined_logs['pdb'].iloc[0]
-        out_path = ESM_DIR / f"{pdb_id}_{chain_id}.pdb"
+        out_path = ESM_DIR / f"{file_stem}.pdb"
         with open(out_path, 'w', buffering=8192) as f:
             f.write(pdb_before)
 
         pLDDT_before = df_combined_logs['plddt'].iloc[0]
         return pLDDT_before
 
-    def fold_chain(sequence, pdb_id, chain_id, model, true_path=None):
+    def fold_chain(sequence, pdb_id, file_stem, model, true_path=None):
         chunk_size = set_dynamic_chunk_size(model, len(sequence))
         logging.info(f"Processing {pdb_id} (length: {len(sequence)}, chunk_size: {chunk_size})")
         model.ttt_reset()
         try:
             if config['use_msa']:
-                msa_file = MSA_PATH / f"{pdb_id}_{chain_id}.a3m"
+                msa_file = MSA_PATH / f"{file_stem}.a3m"
                 if not msa_file.exists():
                     logging.warning(f"MSA file not found: {msa_file}, running without MSA")
                     df = model.ttt(sequence, return_logs=True,correct_pdb_path = true_path)
@@ -171,8 +183,8 @@ def main(config):
             else:
                 df = model.ttt(sequence, return_logs=True, correct_pdb_path = true_path)
             
-            pLDDT_before = save_log(df, pdb_id, chain_id)
-            pLDDT_after = predict_structure(model, sequence, pdb_id, chain_id, out_dir=ESM_TTT_DIR)
+            pLDDT_before = save_log(df, file_stem)
+            pLDDT_after = predict_structure(model, sequence, file_stem, out_dir=ESM_TTT_DIR)
             # model.ttt_reset()
             return pLDDT_before, pLDDT_after
             
@@ -206,9 +218,10 @@ def main(config):
         start_time = time.time()
         seq_id = str(row.get(config['columns']['id_column']))
         chain_id = str(row.get(config['columns']['chain_id_column'], 'A'))
+        file_stem = get_file_stem(seq_id, chain_id)
 
         if config['use_true_pdb']:
-            true_path = CORRECT_PREDICTED_PDB / f"{seq_id}_{chain_id}.pdb"
+            true_path = CORRECT_PREDICTED_PDB / f"{file_stem}.pdb"
         else:
             true_path = None
 
@@ -218,23 +231,23 @@ def main(config):
         pLDDT_ProteinTTT, tm_score_ProteinTTT, lddt_ProteinTTT = None, None, None
         pLDDT_ESMFold, tm_score_ESMFold, lddt_ESMFold = None, None, None
 
-        if not (ESM_TTT_DIR / f"{seq_id}_{chain_id}.pdb").exists():
+        if not (ESM_TTT_DIR / f"{file_stem}.pdb").exists():
             try:
-                pLDDT_ESMFold, pLDDT_ProteinTTT = fold_chain(seq, seq_id, chain_id, model=model, true_path=true_path)
+                pLDDT_ESMFold, pLDDT_ProteinTTT = fold_chain(seq, seq_id, file_stem, model=model, true_path=true_path)
             except Exception as e:
                 df.to_csv(SAVE_PATH, sep="\t", index=False)
                 warnings.warn(f"Error folding chain {seq_id}: {e}")
                 traceback.print_exc()
         else:
-            pLDDT_ProteinTTT = float(np.asarray(bsio.load_structure(ESM_TTT_DIR / f"{seq_id}_{chain_id}.pdb", extra_fields=["b_factor"]).b_factor, dtype=float).mean())
-            pLDDT_ESMFold = float(np.asarray(bsio.load_structure(ESM_DIR / f"{seq_id}_{chain_id}.pdb", extra_fields=["b_factor"]).b_factor, dtype=float).mean())
+            pLDDT_ProteinTTT = float(np.asarray(bsio.load_structure(ESM_TTT_DIR / f"{file_stem}.pdb", extra_fields=["b_factor"]).b_factor, dtype=float).mean())
+            pLDDT_ESMFold = float(np.asarray(bsio.load_structure(ESM_DIR / f"{file_stem}.pdb", extra_fields=["b_factor"]).b_factor, dtype=float).mean())
         try:
             if config['use_true_pdb']:
                 tm_score_ProteinTTT, lddt_ProteinTTT = calculate_metrics(
                     true_path=true_path,
-                    pred_path=ESM_TTT_DIR / f"{seq_id}_{chain_id}.pdb",
+                    pred_path=ESM_TTT_DIR / f"{file_stem}.pdb",
                     chain_id=chain_id,
-                    path_to_fix_pdb=base_path / 'predicted_structures' / 'fixed_pdb_TTT' / f"{seq_id}_{chain_id}.pdb"
+                    path_to_fix_pdb=base_path / 'predicted_structures' / 'fixed_pdb_TTT' / f"{file_stem}.pdb"
                 )
             else:
                 tm_score_ProteinTTT, lddt_ProteinTTT = None, None
@@ -250,9 +263,9 @@ def main(config):
             if config['use_true_pdb']:
                 tm_score_ESMFold, lddt_ESMFold = calculate_metrics(
                     true_path=true_path,
-                    pred_path=ESM_DIR / f"{seq_id}_{chain_id}.pdb",
+                    pred_path=ESM_DIR / f"{file_stem}.pdb",
                     chain_id=chain_id,
-                    path_to_fix_pdb=base_path / 'predicted_structures' / 'fixed_pdb_ESMFold' / f"{seq_id}_{chain_id}.pdb"
+                    path_to_fix_pdb=base_path / 'predicted_structures' / 'fixed_pdb_ESMFold' / f"{file_stem}.pdb"
                 )
             else:
                 tm_score_ESMFold, lddt_ESMFold = None, None
@@ -342,6 +355,18 @@ Examples:
         type=float,
         help='Learning rate (overrides config)'
     )
+    parser.add_argument(
+        '--use_chain_name',
+        action='store_true',
+        default=None,
+        help='Use id_chain format for file names (overrides config)'
+    )
+    parser.add_argument(
+        '--no_chain_name',
+        action='store_true',
+        default=None,
+        help='Use id-only format for file names (overrides config)'
+    )
     
     args = parser.parse_args()
     
@@ -384,6 +409,14 @@ Examples:
     
     if args.lr:
         config['learning_rate'] = args.lr
+    
+    if args.use_chain_name:
+        config['use_chain_name'] = True
+    elif args.no_chain_name:
+        config['use_chain_name'] = False
+    
+    # Default to True if not set anywhere
+    config.setdefault('use_chain_name', True)
     
     # Run experiment
     main(config)

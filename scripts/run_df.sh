@@ -17,4 +17,4 @@ export PYTHONPATH="${PYTHONPATH}:/scratch/project/open-35-8/pimenol1/ProteinTTT/
 
 python3 ./scripts/run_df.py --config ./scripts/config.yaml
 
-echo "Job finished successfully."
+echo "Job finished."
