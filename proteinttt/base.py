@@ -1042,14 +1042,9 @@ class TTTModule(torch.nn.Module, ABC):
         """
         state = {}
         trainable_modules = set(self._ttt_get_trainable_modules())
-        
-        if self in trainable_modules:
-            for name, module in self.named_children():
+        for name, module in self.named_children():
+            if module in trainable_modules:
                 state[name] = copy.deepcopy(module)
-        else:
-            for name, module in self.named_children():
-                if module in trainable_modules:
-                    state[name] = copy.deepcopy(module)
         return state
 
     def _ttt_set_state(self, state: T.Any) -> None:
@@ -1469,10 +1464,6 @@ class TTTModule(torch.nn.Module, ABC):
             tuple containing:
                 - all_log_probs: Log probabilities for each token in the sequence when masked
                 - scaled_perplexity: Scaled pseudo-perplexity (reliability score between 0 and 1)
-
-        References:
-            Gurev, S., et al. "Evaluating Variant Effect Prediction Across Viruses." 
-            bioRxiv (2025). DOI: 10.1101/2025.08.04.668549
         """
         all_log_probs, perplexity = self._ttt_score_seq_pseudo_perplexity(x, **kwargs)
         scaled_perplexity = (20.0 - perplexity) / 19.0
