@@ -8,6 +8,7 @@ use_chain_name: false
 
 # Test-Time Training settings
 use_msa: true  
+msa_sampling_strategy: "neighbors" 
 use_gradient_clip: true
 renumber_pdb: false
 gradient_clip_max_norm: 50.0
