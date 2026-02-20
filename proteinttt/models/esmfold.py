@@ -112,7 +112,17 @@ class ESMFoldTTT(TTTModule, ESMFold):
         correct_pdb_path: T.Optional[Path] = None,
         **kwargs,
     ) -> T.Tuple[dict, dict, T.Optional[float]]:
-
+        eval_step_metric_dict = {}
+        # Compute FGR metrics if enabled and input tensor is available
+        if self.ttt_cfg.fgr_enabled and x is not None:
+            fgr_metrics = self._ttt_compute_fgr_metrics(
+                step=step,
+                loss=loss,
+                perplexity=perplexity,
+                x=x,
+                **kwargs,
+            )
+            eval_step_metric_dict.update(fgr_metrics)
         # Predict structure
         with torch.no_grad():
             output = self.infer(seq, masking_pattern=None)
@@ -135,11 +145,11 @@ class ESMFoldTTT(TTTModule, ESMFold):
             lddt = lddt_score(correct_pdb_path, self._ttt_temp_pdb_path)
 
         eval_step_preds = {"pdb": pdb_str}
-        eval_step_metric_dict = {
+        eval_step_metric_dict.update({
             "plddt": plddt,
             "tm_score": tm_score,
             "lddt": lddt,
-        }
+        })
         confidence = plddt
 
         return eval_step_preds, eval_step_metric_dict, confidence
