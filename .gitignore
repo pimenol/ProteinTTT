@@ -137,3 +137,5 @@ dmypy.json
 # VSCode
 *.vscode
 data/*
+envs_settings/*
+jobs/*
