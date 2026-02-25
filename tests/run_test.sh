@@ -17,6 +17,6 @@ conda activate proteinttt2
 
 export PYTHONPATH="${PYTHONPATH}:/scratch/project/open-35-8/pimenol1/ProteinTTT_merge/ProteinTTT"
 
-pytest -ra tests
+python -m pytest -ra tests
 
-echo "Test finished successfully."
+echo "Test finished."
