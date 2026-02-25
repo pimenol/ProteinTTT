@@ -104,7 +104,7 @@ class TTTConfig:
     gradient_clip: bool = False
     gradient_clip_max_norm: float = 1.0
 
-    msa_sampling_strategy: str = "neighbors"  # 'random', 'top', 'neighbors'
+    msa_sampling_strategy: str = "neighbors"  # 'random', 'top', 'neighbors', 'cluster'
 
     lr_scheduler: str | None = None  # None, 'cosine', 'cosine_warmup'
     lr_warmup_steps: int = 0  
@@ -193,10 +193,10 @@ class TTTConfig:
                     "Scoring for autoregressive models is not implemented yet"
                 )
 
-        if self.msa_sampling_strategy not in ("random", "top", "neighbors"):
+        if self.msa_sampling_strategy not in ("random", "top", "neighbors", "cluster"):
             raise ValueError(
                 f"Invalid msa_sampling_strategy: {self.msa_sampling_strategy}. "
-                "Valid options are 'random', 'top', 'neighbors'."
+                "Valid options are 'random', 'top', 'neighbors', 'cluster'."
             )
 
         if self.tmalign_path is not None and not self.tmalign_path.exists():
@@ -351,15 +351,26 @@ class TTTModule(torch.nn.Module, ABC):
             if not self.ttt_cfg.loss_kind == "msa_soft_labels":
                 x = msa
 
-        # Pre-compute MSA sampling weights for 'neighbors' strategy
+        # Pre-compute MSA sampling data for non-random strategies
         self._msa_sampling_weights = None
-        if self.ttt_cfg.msa and self.ttt_cfg.msa_sampling_strategy == "neighbors" and x.shape[0] > 1:
+        self._msa_cluster_labels = None
+        if self.ttt_cfg.msa and x.shape[0] > 1:
             import numpy as np
-            from proteinttt.utils.sampling import compute_homology_weights
-            gap_token = self._ttt_get_padding_token()
-            msa_np = x.cpu().numpy().astype(np.uint8)
-            _, weights = compute_homology_weights(ungapped_msa=msa_np, gap_token=gap_token)
-            self._msa_sampling_weights = torch.from_numpy(weights).float()
+            if self.ttt_cfg.msa_sampling_strategy == "neighbors":
+                from proteinttt.utils.sampling import compute_homology_weights
+                gap_token = self._ttt_get_padding_token()
+                msa_np = x.cpu().numpy().astype(np.uint8)
+                _, weights = compute_homology_weights(ungapped_msa=msa_np, gap_token=gap_token)
+                self._msa_sampling_weights = torch.from_numpy(weights).float()
+            elif self.ttt_cfg.msa_sampling_strategy == "cluster":
+                from proteinttt.utils.ClusterMSA import cluster_msa
+                msa_np = x.cpu().numpy().astype(np.uint8)
+                self._msa_cluster_labels = cluster_msa(msa_np)
+                n_clusters = len(set(self._msa_cluster_labels) - {-1})
+                self.ttt_logger.info(
+                    f"MSA clustered into {n_clusters} clusters "
+                    f"({(self._msa_cluster_labels == -1).sum()} unclustered)"
+                )
 
         # Get trainable parameters and optimizer
         parameters = self._ttt_get_parameters()
@@ -846,6 +857,47 @@ class TTTModule(torch.nn.Module, ABC):
                 delattr(self, k)
             self.add_module(k, copy.deepcopy(v))
 
+    def _ttt_cluster_sample_indices(
+        self,
+        cluster_labels,
+        batch_size: int,
+        replacement: bool = False,
+    ) -> torch.Tensor:
+        """Sample MSA indices by cycling through DBSCAN clusters.
+
+        Ensures each batch contains sequences from diverse clusters
+        (adapted from AF_Cluster: https://github.com/HWaymentSteele/AF_Cluster).
+
+        Args:
+            cluster_labels: Cluster ID per MSA row (-1 = unclustered).
+            batch_size: Number of indices to return.
+            replacement: Allow sampling the same sequence twice.
+
+        Returns:
+            Tensor of selected MSA indices [batch_size].
+        """
+        import numpy as np
+
+        unique_labels = sorted(set(cluster_labels) - {-1})
+        if len(unique_labels) == 0:
+            # No clusters found — fall back to random
+            return torch.randint(
+                0, len(cluster_labels), (batch_size,), generator=self.ttt_generator
+            )
+
+        # Build member lists per cluster
+        members = {l: np.where(cluster_labels == l)[0] for l in unique_labels}
+
+        indices = []
+        for i in range(batch_size):
+            cid = unique_labels[i % len(unique_labels)]
+            pool = members[cid]
+            idx = pool[
+                torch.randint(0, len(pool), (1,), generator=self.ttt_generator).item()
+            ]
+            indices.append(idx)
+        return torch.tensor(indices, dtype=torch.long)
+
     def _ttt_sample_batch(
         self, x: torch.Tensor
     ) -> T.Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -866,9 +918,9 @@ class TTTModule(torch.nn.Module, ABC):
         crop_size = self.ttt_cfg.crop_size
 
         # Create batch of unmasked and uncropped sequences
-        # Strategy selection adapted from PoET MSA sampling:
         strategy = self.ttt_cfg.msa_sampling_strategy
         weights = getattr(self, "_msa_sampling_weights", None)
+        cluster_labels = getattr(self, "_msa_cluster_labels", None)
 
         if x.shape[0] == 1:
             # If only one sequence, replicate it batch_size times
@@ -882,7 +934,11 @@ class TTTModule(torch.nn.Module, ABC):
                     weights, batch_size, replacement=False,
                     generator=self.ttt_generator,
                 )
-            else:  # "random" (default)
+            elif strategy == "cluster" and cluster_labels is not None:
+                indices = self._ttt_cluster_sample_indices(
+                    cluster_labels, batch_size, replacement=False,
+                )
+            else:  # "random"
                 indices = torch.randint(
                     0, x.shape[0], (batch_size,), generator=self.ttt_generator
                 )
@@ -897,7 +953,12 @@ class TTTModule(torch.nn.Module, ABC):
                     generator=self.ttt_generator,
                 )
                 x_expanded = x[indices]
-            else:  # "random" 
+            elif strategy == "cluster" and cluster_labels is not None:
+                indices = self._ttt_cluster_sample_indices(
+                    cluster_labels, batch_size, replacement=True,
+                )
+                x_expanded = x[indices]
+            else:  # "random"
                 num_repeats = batch_size // x.shape[0] + 1
                 x_repeated = x.repeat(num_repeats, 1)
                 indices = torch.randperm(
