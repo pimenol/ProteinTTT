@@ -104,7 +104,7 @@ class TTTConfig:
     gradient_clip: bool = False
     gradient_clip_max_norm: float = 1.0
 
-    msa_sampling_strategy: str = "neighbors"  # 'random', 'top', 'neighbors', 'cluster'
+    msa_sampling_strategy: str = "random"  # 'random', 'top', 'neighbors', 'cluster'
 
     lr_scheduler: str | None = None  # None, 'cosine', 'cosine_warmup'
     lr_warmup_steps: int = 0  
