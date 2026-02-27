@@ -106,6 +106,9 @@ class TTTConfig:
 
     msa_sampling_strategy: str = "random"  # 'random', 'top', 'neighbors', 'cluster'
 
+    confidence_collapse_ratio: float = 0.0  # Early-stop when confidence < ratio * best_confidence. 0.0 = disabled.
+    confidence_collapse_patience: int = 3  # Number of consecutive collapsed steps before early stopping
+
     lr_scheduler: str | None = None  # None, 'cosine', 'cosine_warmup'
     lr_warmup_steps: int = 0  
     lr_min: float = 0.0
@@ -387,6 +390,7 @@ class TTTModule(torch.nn.Module, ABC):
         if self.ttt_cfg.automatic_best_state_reset:
             best_confidence = 0
             best_state = None
+            collapse_streak = 0  # consecutive steps where confidence collapsed
 
         device = next(self.parameters()).device
         non_blocking = device.type == "cuda"
@@ -479,6 +483,23 @@ class TTTModule(torch.nn.Module, ABC):
                         if confidence > best_confidence:
                             best_confidence = confidence
                             best_state = self._ttt_get_state()
+                            collapse_streak = 0
+                        elif (
+                            self.ttt_cfg.confidence_collapse_ratio > 0
+                            and best_confidence > 0
+                            and confidence < self.ttt_cfg.confidence_collapse_ratio * best_confidence
+                        ):
+                            collapse_streak += 1
+                            if collapse_streak >= self.ttt_cfg.confidence_collapse_patience:
+                                self.ttt_logger.info(
+                                    f"Early stopping at step {step // self.ttt_cfg.ags}: "
+                                    f"confidence {confidence:.2f} collapsed below "
+                                    f"{self.ttt_cfg.confidence_collapse_ratio:.0%} of best "
+                                    f"({best_confidence:.2f}) for {collapse_streak} consecutive steps"
+                                )
+                                break
+                        else:
+                            collapse_streak = 0
                 else:
                     eval_step_metric_dict = {}
                     eval_step_preds = None

@@ -1,22 +1,25 @@
 # ProteinTTT Configuration File
 
 # Data settings
-df_path: ""  # REQUIRED: Path to your data directory
+df_path: "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh/data/bfvd/experements_msa/best"  # REQUIRED: Path to your data directory
 max_sequence_length: 500
 use_true_pdb: false 
 use_chain_name: false
+new_experement_dir: true
 
 # Test-Time Training settings
 msa: true  
 msa_sampling_strategy: "random" 
 gradient_clip: true
 renumber_pdb: false
-gradient_clip_max_norm: 50.0
+gradient_clip_max_norm: 10.0
+confidence_collapse_ratio: 0.5   # early-stop if pLDDT drops below 50% of best
+confidence_collapse_patience: 3   # after 3 consecutive collapsed steps
 steps: 100
 lr: 0.04
 lora_rank: 128
 lora_alpha: 256
-ags: 8 
+ags: 8
 # fgr_enabled: true
 # score_seq_kind: "scaled_pseudo_perplexity"
 

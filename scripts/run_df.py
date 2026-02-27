@@ -13,6 +13,8 @@ import argparse
 import os
 import uuid
 import traceback
+import shutil
+import re
 from proteinttt.utils.plots import plot_mean_scores_vs_step
 from proteinttt.utils.align_pdb_numbering import align_pdb_numbering
 import logging
@@ -50,24 +52,50 @@ def main(config):
         print("ProteinTTT version: not available")
     
     # Setup paths
-    base_path = Path(config['df_path'])
-    if not base_path.exists():
-        raise ValueError(f"df_path does not exist: {base_path}")
-    
+    source_base_path = Path(config['df_path']).expanduser().resolve()
+    if not source_base_path.exists():
+        raise ValueError(f"df_path does not exist: {source_base_path}")
+
+    JOB_SUFFIX = os.getenv("SLURM_JOB_ID", str(uuid.uuid4()))
+
+    if config.get('new_experement_dir', False):
+        run_name = (
+            f"lr_{config.get('lr', 'na')}_"
+            f"ags_{config.get('ags', 'na')}_"
+            f"msa_{config.get('msa', 'na')}_"
+            f"grad_{config.get('gradient_clip_max_norm', 'na')}_"
+            f"{config.get('msa_sampling_strategy', 'na')}_"
+            f"{JOB_SUFFIX}"
+        )
+        run_name = re.sub(r"[^A-Za-z0-9._-]+", "_", run_name)
+        base_path = source_base_path.parent / "experements_output" / run_name
+    else:
+        base_path = source_base_path
+
     ESM_TTT_DIR = base_path / config['output']['esm_ttt_dir']
     ESM_DIR = base_path / config['output']['esm_dir']
     LOGS_DIR = base_path / config['output']['logs_dir']
     PLOT_PATH = base_path / config['output']['plots_dir']
     SAVE_PATH = base_path / config['output']['results_file']
+    source_summary_path = source_base_path / config['input']['summary_file']
     SUMMARY_PATH = base_path / config['input']['summary_file']
-    CORRECT_PREDICTED_PDB = Path(config['input']['pdb_dir'])
-    MSA_PATH = base_path / config['input']['msa_dir']
+    CORRECT_PREDICTED_PDB = Path(config['input']['pdb_dir']) if Path(config['input']['pdb_dir']).is_absolute() else source_base_path / config['input']['pdb_dir']
+    MSA_PATH = Path(config['input']['msa_dir']) if Path(config['input']['msa_dir']).is_absolute() else source_base_path / config['input']['msa_dir']
 
     # Create output directories
+    base_path.mkdir(parents=True, exist_ok=True)
     ESM_TTT_DIR.mkdir(parents=True, exist_ok=True)
     ESM_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     PLOT_PATH.mkdir(parents=True, exist_ok=True)
+
+    if not source_summary_path.exists():
+        raise ValueError(f"summary file does not exist: {source_summary_path}")
+
+    if config.get('new_experement_dir', False):
+        shutil.copy2(source_summary_path, SUMMARY_PATH)
+    else:
+        SUMMARY_PATH = source_summary_path
 
     # Configure logging
     logging.basicConfig(
@@ -84,8 +112,9 @@ def main(config):
     library_logger = logging.getLogger("ttt_log")
     library_logger.propagate = False
     
-    JOB_SUFFIX = os.getenv("SLURM_JOB_ID", str(uuid.uuid4()))
     logging.info(f"Job ID: {JOB_SUFFIX}")
+    logging.info(f"Input df_path: {source_base_path}")
+    logging.info(f"Output path: {base_path}")
     logging.info("="*60)
     logging.info("Configuration:")
     for key, value in config.items():
@@ -103,7 +132,7 @@ def main(config):
     base_model = esm.pretrained.esmfold_v0().eval().to(device)
     
     # Build TTT configuration
-    if config['use_gradient_clip']:
+    if config['gradient_clip']:
         ttt_cfg = GRAD_CLIP_ESMFOLD_TTT_CFG
     else:
         ttt_cfg = DEFAULT_ESMFOLD_TTT_CFG
@@ -114,7 +143,7 @@ def main(config):
             setattr(ttt_cfg, key, value)
     
     # Set initial chunk size
-    if config.get('use_msa', False):
+    if config.get('msa', False):
         base_model.set_chunk_size(128)
     
     logging.info(f"TTT config: {ttt_cfg}")
@@ -151,7 +180,8 @@ def main(config):
 
         pdb_strings_map = {}
         for step, data_for_step in step_data.items():
-            pdb_strings_map[step] = data_for_step['eval_step_preds']['pdb'][0]
+            pdb = data_for_step['eval_step_preds']['pdb']
+            pdb_strings_map[step] = pdb[0] if pdb is not None else None
 
         df_logs['pdb'] = df_logs['step'].map(pdb_strings_map)
 
@@ -173,7 +203,7 @@ def main(config):
         logging.info(f"Processing {pdb_id} (length: {len(sequence)}, chunk_size: {chunk_size})")
         model.ttt_reset()
         try:
-            if config['use_msa']:
+            if config['msa']:
                 msa_file = MSA_PATH / f"{file_stem}.a3m"
                 if not msa_file.exists():
                     logging.warning(f"MSA file not found: {msa_file}, running without MSA")
@@ -311,7 +341,7 @@ Examples:
   python run_df.py --config config.yaml --df_path /path/to/data
   
   # Override specific settings
-  python run_df.py --config config.yaml --use_msa --steps 20
+  python run_df.py --config config.yaml --msa --steps 20
         """
     )
     parser.add_argument(
@@ -326,12 +356,12 @@ Examples:
         help='Path to the data directory (overrides config file)'
     )
     parser.add_argument(
-        '--use_msa',
+        '--msa',
         action='store_true',
         help='Enable MSA mode (overrides config)'
     )
     parser.add_argument(
-        '--use_gradient_clip',
+        '--gradient_clip',
         action='store_true',
         help='Enable gradient clipping (overrides config)'
     )
@@ -391,12 +421,12 @@ Examples:
         print("Error: df_path must be specified either in config file or via --df_path")
         sys.exit(1)
     
-    if args.use_msa:
-        config['use_msa'] = True
-        config['use_gradient_clip'] = True  # MSA typically needs gradient clipping
+    if args.msa:
+        config['msa'] = True
+        config['gradient_clip'] = True  # MSA typically needs gradient clipping
         
-    if args.use_gradient_clip:
-        config['use_gradient_clip'] = True
+    if args.gradient_clip:
+        config['gradient_clip'] = True
         
     if args.use_true_pdb:
         config['use_true_pdb'] = True
@@ -408,7 +438,7 @@ Examples:
         config['steps'] = args.steps
     
     if args.lr:
-        config['learning_rate'] = args.lr
+        config['lr'] = args.lr
     
     if args.use_chain_name:
         config['use_chain_name'] = True

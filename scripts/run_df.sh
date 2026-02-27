@@ -12,9 +12,9 @@
 source "/scratch/project/open-35-8/pimenol1/miniconda3/etc/profile.d/conda.sh"
 conda activate proteinttt
 
-cd /scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT || exit 1
-export PYTHONPATH="${PYTHONPATH}:/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT"
+cd /scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh || exit 1
+export PYTHONPATH="${PYTHONPATH}:/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh"
 
-python3 ./scripts/run_df.py --config ./scripts/config.yaml
+python3 ./scripts/run_df.py --config ./scripts/config_MSA.yaml
 
 echo "Job finished."
