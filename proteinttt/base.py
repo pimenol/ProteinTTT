@@ -603,11 +603,11 @@ class TTTModule(torch.nn.Module, ABC):
                 else:
                     # Apply gradient clipping if enabled in config
                     if self.ttt_cfg.gradient_clip and len(trainable_params) > 0:
-                        torch.nn.utils.clip_grad_norm_(
+                        total_norm = torch.nn.utils.clip_grad_norm_(
                             trainable_params, 
                             max_norm=self.ttt_cfg.gradient_clip_max_norm
                         )
-                    
+                        # self.ttt_logger.info(f"Total gradient norm: {total_norm}")                    
                     optimizer.step()
                     if scheduler is not None:
                         scheduler.step()
@@ -909,9 +909,14 @@ class TTTModule(torch.nn.Module, ABC):
         # Build member lists per cluster
         members = {l: np.where(cluster_labels == l)[0] for l in unique_labels}
 
+        # Shuffle cluster order each call so all clusters are visited over time
+        shuffled_labels = unique_labels.copy()
+        perm = torch.randperm(len(shuffled_labels), generator=self.ttt_generator).tolist()
+        shuffled_labels = [shuffled_labels[i] for i in perm]
+
         indices = []
         for i in range(batch_size):
-            cid = unique_labels[i % len(unique_labels)]
+            cid = shuffled_labels[i % len(shuffled_labels)]
             pool = members[cid]
             idx = pool[
                 torch.randint(0, len(pool), (1,), generator=self.ttt_generator).item()

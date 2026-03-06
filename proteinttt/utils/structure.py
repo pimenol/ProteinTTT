@@ -14,8 +14,8 @@ def calculate_tm_score(
     chain_id=None,
     use_tmalign=False,
     verbose=False,
-    tmscore_path=None,
-    tmalign_path=None,
+    tmscore_path="/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT/TMalign",
+    tmalign_path="/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh/TMalign.cpp"
 ):
     """Calculate TM-score between predicted and reference protein structures.
 

@@ -15,6 +15,6 @@ conda activate proteinttt
 cd /scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh || exit 1
 export PYTHONPATH="${PYTHONPATH}:/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh"
 
-python3 ./scripts/run_df.py --config ./scripts/config_MSA.yaml
+python3 ./scripts/run_df.py --config ./scripts/config_marts_db_MSA.yaml
 
 echo "Job finished."

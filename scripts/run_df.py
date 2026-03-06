@@ -23,11 +23,11 @@ import yaml
 
 def set_dynamic_chunk_size(model, sequence_length):
     """Dynamically set chunk size based on sequence length."""
-    if sequence_length < 100:
+    if sequence_length < 200:
         chunk_size = 256
-    elif sequence_length < 200:
+    elif sequence_length < 470:
         chunk_size = 128
-    elif sequence_length < 400:
+    elif sequence_length < 470:
         chunk_size = 64
     elif sequence_length < 500:
         chunk_size = 32
@@ -68,7 +68,7 @@ def main(config):
             f"{JOB_SUFFIX}"
         )
         run_name = re.sub(r"[^A-Za-z0-9._-]+", "_", run_name)
-        base_path = source_base_path.parent / "experements_output" / run_name
+        base_path = source_base_path / "experements_output" / run_name
     else:
         base_path = source_base_path
 
@@ -138,8 +138,9 @@ def main(config):
         ttt_cfg = DEFAULT_ESMFOLD_TTT_CFG
     
     # Apply config settings
+    SCRIPT_ONLY_KEYS = {'df_path', 'output', 'input', 'compute_step_metrics'}
     for key, value in config.items():
-        if key not in ['df_path', 'output', 'input']:
+        if key not in SCRIPT_ONLY_KEYS:
             setattr(ttt_cfg, key, value)
     
     # Set initial chunk size
@@ -202,16 +203,18 @@ def main(config):
         chunk_size = set_dynamic_chunk_size(model, len(sequence))
         logging.info(f"Processing {pdb_id} (length: {len(sequence)}, chunk_size: {chunk_size})")
         model.ttt_reset()
+        # Only pass correct_pdb_path for per-step LDDT/TM-score when requested
+        step_pdb_path = true_path if config.get('compute_step_metrics', True) else None
         try:
             if config['msa']:
                 msa_file = MSA_PATH / f"{file_stem}.a3m"
                 if not msa_file.exists():
                     logging.warning(f"MSA file not found: {msa_file}, running without MSA")
-                    df = model.ttt(sequence, return_logs=True,correct_pdb_path = true_path)
+                    df = model.ttt(sequence, return_logs=True, correct_pdb_path=step_pdb_path)
                 else:
-                    df = model.ttt(sequence, msa_pth=msa_file, return_logs=True, correct_pdb_path = true_path)
+                    df = model.ttt(sequence, msa_pth=msa_file, return_logs=True, correct_pdb_path=step_pdb_path)
             else:
-                df = model.ttt(sequence, return_logs=True, correct_pdb_path = true_path)
+                df = model.ttt(sequence, return_logs=True, correct_pdb_path=step_pdb_path)
             
             pLDDT_before = save_log(df, file_stem)
             pLDDT_after = predict_structure(model, sequence, file_stem, out_dir=ESM_TTT_DIR)
@@ -321,7 +324,27 @@ def main(config):
     logging.info(f"Plots saved to {PLOT_PATH}")
 
     total_time = time.time() - start_total_time
-    logging.info(f"="*60)
+
+    # --- Summary statistics ---
+    logging.info("="*60)
+    logging.info("Summary statistics:")
+
+    mean_plddt_ttt = df['pLDDT_ProteinTTT'].mean()
+    mean_plddt_esm = df['pLDDT_ESMFold'].mean()
+    logging.info(f"  Mean pLDDT (ProteinTTT): {mean_plddt_ttt:.4f}")
+    logging.info(f"  Mean pLDDT (ESMFold):    {mean_plddt_esm:.4f}")
+
+    if config['use_true_pdb']:
+        mean_lddt_ttt = df['lddt_ProteinTTT'].mean()
+        mean_lddt_esm = df['lddt_ESMFold'].mean()
+        mean_tm_ttt = df['tm_score_ProteinTTT'].mean()
+        mean_tm_esm = df['tm_score_ESMFold'].mean()
+        logging.info(f"  Mean LDDT (ProteinTTT):  {mean_lddt_ttt:.4f}")
+        logging.info(f"  Mean LDDT (ESMFold):     {mean_lddt_esm:.4f}")
+        logging.info(f"  Mean TM-score (ProteinTTT): {mean_tm_ttt:.4f}")
+        logging.info(f"  Mean TM-score (ESMFold):    {mean_tm_esm:.4f}")
+
+    logging.info("="*60)
     logging.info(f"Experiment completed successfully!")
     logging.info(f"Total time elapsed: {total_time:.2f} seconds for {processed_count} sequences")
     logging.info(f"Average time per sequence: {total_time/processed_count:.2f} seconds")
@@ -397,6 +420,11 @@ Examples:
         default=None,
         help='Use id-only format for file names (overrides config)'
     )
+    parser.add_argument(
+        '--no_step_metrics',
+        action='store_true',
+        help='Skip per-step LDDT & TM-score during TTT (pLDDT still computed). Overrides config.'
+    )
     
     args = parser.parse_args()
     
@@ -445,8 +473,12 @@ Examples:
     elif args.no_chain_name:
         config['use_chain_name'] = False
     
+    if args.no_step_metrics:
+        config['compute_step_metrics'] = False
+    
     # Default to True if not set anywhere
     config.setdefault('use_chain_name', True)
+    config.setdefault('compute_step_metrics', True)
     
     # Run experiment
     main(config)
