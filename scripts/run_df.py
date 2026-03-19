@@ -126,6 +126,7 @@ def main(config):
     df['sequence_length'] = df['sequence'].apply(len)
     max_len = config['max_sequence_length']
     df = df.query(f"sequence_length <= {max_len}").copy()
+    # df = df.iloc[::-1]
     logging.info(f"Loaded {len(df)} sequences (max length: {max_len})")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -203,16 +204,16 @@ def main(config):
         chunk_size = set_dynamic_chunk_size(model, len(sequence))
         logging.info(f"Processing {pdb_id} (length: {len(sequence)}, chunk_size: {chunk_size})")
         model.ttt_reset()
+        model.set_chunk_size(chunk_size)
         # Only pass correct_pdb_path for per-step LDDT/TM-score when requested
         step_pdb_path = true_path if config.get('compute_step_metrics', True) else None
         try:
             if config['msa']:
                 msa_file = MSA_PATH / f"{file_stem}.a3m"
                 if not msa_file.exists():
-                    logging.warning(f"MSA file not found: {msa_file}, running without MSA")
-                    df = model.ttt(sequence, return_logs=True, correct_pdb_path=step_pdb_path)
-                else:
-                    df = model.ttt(sequence, msa_pth=msa_file, return_logs=True, correct_pdb_path=step_pdb_path)
+                    logging.warning(f"MSA file not found: {msa_file}, skipping protein {seq_id}")
+                    return None, None
+                df = model.ttt(sequence, msa_pth=msa_file, return_logs=True, correct_pdb_path=step_pdb_path)
             else:
                 df = model.ttt(sequence, return_logs=True, correct_pdb_path=step_pdb_path)
             
@@ -267,6 +268,9 @@ def main(config):
         if not (ESM_TTT_DIR / f"{file_stem}.pdb").exists():
             try:
                 pLDDT_ESMFold, pLDDT_ProteinTTT = fold_chain(seq, seq_id, file_stem, model=model, true_path=true_path)
+                if pLDDT_ESMFold is None and pLDDT_ProteinTTT is None:
+                    logging.info(f"Skipping sequence {processed_count}/{len(df)} (ID: {seq_id}) — MSA file not found")
+                    continue
             except Exception as e:
                 df.to_csv(SAVE_PATH, sep="\t", index=False)
                 warnings.warn(f"Error folding chain {seq_id}: {e}")
@@ -313,7 +317,7 @@ def main(config):
         # Format pLDDT values safely, handling None
         pLDDT_ESMFold_str = f"{pLDDT_ESMFold:.2f}" if pLDDT_ESMFold is not None else "N/A"
         pLDDT_ProteinTTT_str = f"{pLDDT_ProteinTTT:.2f}" if pLDDT_ProteinTTT is not None else "N/A"
-        logging.info(f"Processed sequence {i} (ID: {seq_id}), before: {pLDDT_ESMFold_str}, after: {pLDDT_ProteinTTT_str}, time: {time.time() - start_time:.2f}s")
+        logging.info(f"Processed sequence {processed_count}/{len(df)} (ID: {seq_id}), before: {pLDDT_ESMFold_str}, after: {pLDDT_ProteinTTT_str}, time: {time.time() - start_time:.2f}s")
 
     df.to_csv(SAVE_PATH, sep="\t", index=False)
     logging.info(f"Results saved to {SAVE_PATH}")
