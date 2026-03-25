@@ -238,7 +238,6 @@ def main(config):
 
         return tm_score, lddt
 
-    # --- Main Processing Loop ---
     processed_count = 0
 
     start_total_time = time.time()
