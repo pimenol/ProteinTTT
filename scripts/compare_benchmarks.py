@@ -12,7 +12,7 @@ Usage:
         path/to/benchmark/exp2
 
     # Compare ALL experiments under a benchmark root
-    python scripts/compare_benchmarks.py --benchmark_dir /scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh/data/benchmark/benchmark_20
+    python scripts/compare_benchmarks.py --benchmark_dir /scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh/data/benchmark/msa_sampling
 
     # Custom output location
     python scripts/compare_benchmarks.py --benchmark_dir path/to/benchmark --output_dir path/to/comparison

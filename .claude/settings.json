@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/visualize_log.py data/cameo_testset/logs/7eqs_A_log.tsv)",
+      "Bash(pip install:*)",
+      "Bash(python -c \"import matplotlib\")"
+    ],
+    "additionalDirectories": [
+      "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh"
+    ]
+  }
+}

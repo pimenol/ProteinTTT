@@ -508,7 +508,7 @@ def main():
             run_name = "_".join(name_parts) + f"_{job_suffix}"
 
         run_name = re.sub(r"[^A-Za-z0-9._-]+", "_", run_name)
-        output_dir = source_base_path / "benchmark_20" / run_name
+        output_dir = source_base_path / run_name
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
