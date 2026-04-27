@@ -87,10 +87,10 @@ def run_seed(model, config, seed, df, output_dir, pdb_dir, msa_dir):
         seq_id = str(row[id_col])
         seq = str(row[seq_col]).strip().upper()
         true_path = pdb_dir / f"{seq_id}.pdb"
+        has_reference = true_path.exists()
 
-        if not true_path.exists():
-            logging.warning(f"[Seed {seed}] Reference PDB not found: {true_path}, skipping {seq_id}")
-            continue
+        if not has_reference:
+            logging.info(f"[Seed {seed}] No reference PDB for {seq_id}, will use pLDDT only")
 
         logging.info(f"[Seed {seed}] Processing {seq_id} (length: {len(seq)})")
         start_time = time.time()
@@ -107,8 +107,11 @@ def run_seed(model, config, seed, df, output_dir, pdb_dir, msa_dir):
                     logging.warning(f"[Seed {seed}] MSA not found: {msa_file}, running without MSA")
                     msa_file = None
 
-            # Run TTT with per-step LDDT
-            ttt_result = model.ttt(seq, msa_pth=msa_file, correct_pdb_path=true_path)
+            # Run TTT (pass correct_pdb_path only if reference exists)
+            ttt_result = model.ttt(
+                seq, msa_pth=msa_file,
+                correct_pdb_path=true_path if has_reference else None,
+            )
 
             # Save per-step metrics (compact – no PDB strings)
             df_logs = ttt_result["df"].copy()
@@ -133,15 +136,24 @@ def run_seed(model, config, seed, df, output_dir, pdb_dir, msa_dir):
             struct = bsio.load_structure(str(out_pdb), extra_fields=["b_factor"])
             plddt_after = float(np.asarray(struct.b_factor, dtype=float).mean())
 
-            # Compute final LDDT against reference
-            lddt_after = lddt_score(str(true_path), str(out_pdb))
-            lddt_before = lddt_score(str(true_path), str(esm_dir / f"{seq_id}.pdb"))
+            # Compute final LDDT against reference (only if available)
+            lddt_after = None
+            lddt_before = None
+            if has_reference:
+                lddt_after = lddt_score(str(true_path), str(out_pdb))
+                lddt_before = lddt_score(str(true_path), str(esm_dir / f"{seq_id}.pdb"))
 
             elapsed = time.time() - start_time
-            logging.info(
-                f"[Seed {seed}] {seq_id}: pLDDT {plddt_before:.2f} -> {plddt_after:.2f}, "
-                f"LDDT {lddt_before:.4f} -> {lddt_after:.4f}, time: {elapsed:.1f}s"
-            )
+            if has_reference:
+                logging.info(
+                    f"[Seed {seed}] {seq_id}: pLDDT {plddt_before:.2f} -> {plddt_after:.2f}, "
+                    f"LDDT {lddt_before:.4f} -> {lddt_after:.4f}, time: {elapsed:.1f}s"
+                )
+            else:
+                logging.info(
+                    f"[Seed {seed}] {seq_id}: pLDDT {plddt_before:.2f} -> {plddt_after:.2f}, "
+                    f"time: {elapsed:.1f}s"
+                )
 
             results.append(
                 {
@@ -163,11 +175,16 @@ def run_seed(model, config, seed, df, output_dir, pdb_dir, msa_dir):
     results_df = pd.DataFrame(results)
     results_df.to_csv(seed_dir / "results.tsv", sep="\t", index=False)
 
+    has_lddt = "lddt_ProteinTTT" in results_df.columns and results_df["lddt_ProteinTTT"].notna().any()
     avg_time = results_df["time_seconds"].mean() if len(results_df) else 0.0
+    metric_str = (
+        f"mean LDDT = {results_df['lddt_ProteinTTT'].mean():.4f}"
+        if has_lddt
+        else f"mean pLDDT = {results_df['pLDDT_ProteinTTT'].mean():.2f}"
+    )
     logging.info(
         f"[Seed {seed}] Done – {len(results_df)} proteins, "
-        f"mean LDDT = {results_df['lddt_ProteinTTT'].mean():.4f}, "
-        f"avg time per protein = {avg_time:.1f}s"
+        f"{metric_str}, avg time per protein = {avg_time:.1f}s"
     )
     return results_df
 
@@ -212,8 +229,16 @@ def generate_plots(output_dir, seeds):
         logging.error("No results found for any seed – cannot generate plots.")
         return
 
+    # Determine whether per-step LDDT is available (or only pLDDT)
+    has_step_lddt = any(
+        "lddt" in step_data_per_seed[s].columns and step_data_per_seed[s]["lddt"].notna().any()
+        for s in step_data_per_seed
+    ) if step_data_per_seed else False
+    step_metric_col = "lddt" if has_step_lddt else "plddt"
+    step_metric_label = "LDDT" if has_step_lddt else "pLDDT"
+
     # ======================================================================
-    # Plot 1: Mean LDDT per step
+    # Plot 1: Mean LDDT (or pLDDT) per step
     # ======================================================================
     fig, ax = plt.subplots(figsize=(10, 6))
     all_mean_lddts = []
@@ -221,10 +246,10 @@ def generate_plots(output_dir, seeds):
         if seed not in step_data_per_seed:
             continue
         sdf = step_data_per_seed[seed]
-        if "lddt" not in sdf.columns or sdf["lddt"].dropna().empty:
-            logging.warning(f"No per-step LDDT for seed {seed}")
+        if step_metric_col not in sdf.columns or sdf[step_metric_col].dropna().empty:
+            logging.warning(f"No per-step {step_metric_label} for seed {seed}")
             continue
-        mean_lddt = sdf.groupby("step")["lddt"].mean()
+        mean_lddt = sdf.groupby("step")[step_metric_col].mean()
         ax.plot(
             mean_lddt.index, mean_lddt.values,
             "o-", color=colors[i % len(colors)],
@@ -246,12 +271,12 @@ def generate_plots(output_dir, seeds):
         ax.fill_between(common_steps, mean_vals - std_vals, mean_vals + std_vals, alpha=0.2, color="gray")
 
     ax.set_xlabel("Step", fontsize=12)
-    ax.set_ylabel("Mean LDDT", fontsize=12)
-    ax.set_title("Mean LDDT per Step", fontsize=14)
+    ax.set_ylabel(f"Mean {step_metric_label}", fontsize=12)
+    ax.set_title(f"Mean {step_metric_label} per Step", fontsize=14)
     ax.legend()
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(plots_dir / "mean_lddt_per_step.png", dpi=300, bbox_inches="tight")
+    plt.savefig(plots_dir / f"mean_{step_metric_col}_per_step.png", dpi=300, bbox_inches="tight")
     plt.close()
 
     # ======================================================================
@@ -294,23 +319,29 @@ def generate_plots(output_dir, seeds):
     plt.close()
 
     # ======================================================================
-    # Plot 3: Bar plot – Mean LDDT and Mean Time per protein (across seeds)
+    # Plot 3: Bar plot – Mean metric and Mean Time per protein (across seeds)
     # ======================================================================
-    seed_mean_lddts = []
+    # Determine whether final LDDT is available
+    first_seed_df = next(iter(final_results.values()))
+    has_final_lddt = "lddt_ProteinTTT" in first_seed_df.columns and first_seed_df["lddt_ProteinTTT"].notna().any()
+    bar_metric_col = "lddt_ProteinTTT" if has_final_lddt else "pLDDT_ProteinTTT"
+    bar_metric_label = "LDDT" if has_final_lddt else "pLDDT"
+
+    seed_mean_metrics = []
     seed_mean_times = []
     valid_seeds = []
     for seed in seeds:
         if seed in final_results:
-            seed_mean_lddts.append(final_results[seed]["lddt_ProteinTTT"].mean())
+            seed_mean_metrics.append(final_results[seed][bar_metric_col].mean())
             seed_mean_times.append(final_results[seed]["time_seconds"].mean())
             valid_seeds.append(seed)
 
-    if not seed_mean_lddts:
-        logging.error("No final LDDT data available for bar plot.")
+    if not seed_mean_metrics:
+        logging.error("No final metric data available for bar plot.")
         return
 
-    lddt_mean = np.mean(seed_mean_lddts)
-    lddt_std = np.std(seed_mean_lddts)
+    metric_mean = np.mean(seed_mean_metrics)
+    metric_std = np.std(seed_mean_metrics)
     time_mean = np.mean(seed_mean_times)
     time_std = np.std(seed_mean_times)
     n_proteins = len(final_results[valid_seeds[0]])
@@ -322,17 +353,17 @@ def generate_plots(output_dir, seeds):
     point_color = "#4CAF50"
 
     # Semi-transparent bars
-    ax1.bar(x[0], lddt_mean, width=0.5, color=bar_colors[0],
-            alpha=0.35, edgecolor="black", linewidth=0.5, label="Mean LDDT")
-    ax1.errorbar(x[0], lddt_mean, yerr=lddt_std, fmt="none", ecolor="black", capsize=6, linewidth=2)
+    ax1.bar(x[0], metric_mean, width=0.5, color=bar_colors[0],
+            alpha=0.35, edgecolor="black", linewidth=0.5, label=f"Mean {bar_metric_label}")
+    ax1.errorbar(x[0], metric_mean, yerr=metric_std, fmt="none", ecolor="black", capsize=6, linewidth=2)
 
-    # Scatter individual seed values on top (like the reference plot style)
-    jitter = np.random.default_rng(42).uniform(-0.12, 0.12, len(seed_mean_lddts))
-    ax1.scatter(np.zeros(len(seed_mean_lddts)) + jitter, seed_mean_lddts,
+    # Scatter individual seed values on top
+    jitter = np.random.default_rng(42).uniform(-0.12, 0.12, len(seed_mean_metrics))
+    ax1.scatter(np.zeros(len(seed_mean_metrics)) + jitter, seed_mean_metrics,
                 color=point_color, edgecolors="black", linewidths=0.5,
                 s=60, zorder=5, label="Per-seed")
 
-    ax1.set_ylabel("Mean LDDT", fontsize=12, color=bar_colors[0])
+    ax1.set_ylabel(f"Mean {bar_metric_label}", fontsize=12, color=bar_colors[0])
     ax1.tick_params(axis="y", labelcolor=bar_colors[0])
 
     # Second y-axis for time
@@ -351,24 +382,25 @@ def generate_plots(output_dir, seeds):
     ax2.tick_params(axis="y", labelcolor=bar_colors[1])
 
     ax1.set_xticks(x)
-    ax1.set_xticklabels(["Mean LDDT", "Mean Time"], fontsize=11)
+    ax1.set_xticklabels([f"Mean {bar_metric_label}", "Mean Time"], fontsize=11)
     ax1.set_title(f"Benchmark Summary ({n_proteins} proteins, {len(valid_seeds)} seeds)", fontsize=14)
     ax1.grid(True, alpha=0.3, axis="y")
 
     # Annotate bars
-    ax1.text(0, lddt_mean + lddt_std + 0.008,
-             f"{lddt_mean:.4f} ± {lddt_std:.4f}",
+    fmt = ".4f" if has_final_lddt else ".2f"
+    ax1.text(0, metric_mean + metric_std + 0.008,
+             f"{metric_mean:{fmt}} ± {metric_std:{fmt}}",
              ha="center", va="bottom", fontsize=10, fontweight="bold", color=bar_colors[0])
     ax2.text(1, time_mean + time_std + 0.5,
              f"{time_mean:.1f} ± {time_std:.1f}s",
              ha="center", va="bottom", fontsize=10, fontweight="bold", color=bar_colors[1])
 
     plt.tight_layout()
-    plt.savefig(plots_dir / "final_mean_lddt_bar.png", dpi=300, bbox_inches="tight")
+    plt.savefig(plots_dir / f"final_mean_{bar_metric_col}_bar.png", dpi=300, bbox_inches="tight")
     plt.close()
 
     logging.info(f"Plots saved to {plots_dir}")
-    logging.info(f"  Mean LDDT across seeds: {lddt_mean:.4f} ± {lddt_std:.4f}")
+    logging.info(f"  Mean {bar_metric_label} across seeds: {metric_mean:{fmt}} ± {metric_std:{fmt}}")
     logging.info(f"  Mean time per protein:  {time_mean:.1f}s ± {time_std:.1f}s")
 
 
