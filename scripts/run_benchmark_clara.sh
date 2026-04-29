@@ -31,7 +31,6 @@ done
 
 python3 ./scripts/run_benchmark.py \
     --config "$CONFIG" \
-    --seeds 0 1 2 \
     "${EXTRA_ARGS[@]}"
 
 echo "Benchmark finished."

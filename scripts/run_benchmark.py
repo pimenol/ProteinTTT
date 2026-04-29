@@ -37,6 +37,10 @@ from proteinttt.models.esmfold import (
 )
 from proteinttt.utils.structure import lddt_score
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from generate_msa import generate_msa
+from structure_detects import describe_protein_structure
+
 
 # ---------------------------------------------------------------------------
 # Helpers (reused from run_df.py)
@@ -104,8 +108,16 @@ def run_seed(model, config, seed, df, output_dir, pdb_dir, msa_dir):
             if config.get("msa", False):
                 msa_file = msa_dir / f"{seq_id}.a3m"
                 if not msa_file.exists():
-                    logging.warning(f"[Seed {seed}] MSA not found: {msa_file}, running without MSA")
-                    msa_file = None
+                    if config.get("generate_msa", False):
+                        logging.info(f"[Seed {seed}] Generating MSA for {seq_id} -> {msa_dir}")
+                        try:
+                            msa_file = generate_msa(seq, seq_id, cache_dir=msa_dir)
+                        except Exception as e:
+                            logging.warning(f"[Seed {seed}] MSA generation failed for {seq_id}: {e}, running without MSA")
+                            msa_file = None
+                    else:
+                        logging.warning(f"[Seed {seed}] MSA not found: {msa_file}, running without MSA")
+                        msa_file = None
 
             # Run TTT (pass correct_pdb_path only if reference exists)
             ttt_result = model.ttt(
@@ -135,6 +147,13 @@ def run_seed(model, config, seed, df, output_dir, pdb_dir, msa_dir):
                 f.write(pdb_str_after)
             struct = bsio.load_structure(str(out_pdb), extra_fields=["b_factor"])
             plddt_after = float(np.asarray(struct.b_factor, dtype=float).mean())
+
+            if config.get("describe_structure", False):
+                try:
+                    description = describe_protein_structure(str(out_pdb))
+                    logging.info(f"[Seed {seed}] {seq_id} structure description: {description}")
+                except Exception as e:
+                    logging.warning(f"[Seed {seed}] describe_protein_structure failed for {seq_id}: {e}")
 
             # Compute final LDDT against reference (only if available)
             lddt_after = None
@@ -414,7 +433,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config file")
-    parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2], help="Seeds (default: 0 1 2)")
+    parser.add_argument("--seeds", nargs="+", type=int, default=None, help="Seeds to run (default: range(num_seeds) from config)")
     parser.add_argument("--output_dir", type=str, default=None,
                         help="Explicit output directory. If omitted, a unique dir is created under <df_path>/benchmark/")
     parser.add_argument("--name", type=str, default=None, help="Custom experiment name (used in auto-generated dir)")
@@ -490,6 +509,9 @@ def main():
 
     # Force per-step metrics for benchmark
     config["compute_step_metrics"] = True
+
+    if args.seeds is None:
+        args.seeds = list(range(config.get("num_seeds", 3)))
 
     # Paths
     source_base_path = Path(config["df_path"]).expanduser().resolve()
@@ -587,7 +609,7 @@ def main():
     base_model = esm.pretrained.esmfold_v0().eval().to(device)
 
     ttt_cfg = GRAD_CLIP_ESMFOLD_TTT_CFG if config.get("gradient_clip", False) else DEFAULT_ESMFOLD_TTT_CFG
-    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns"}
+    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns", "generate_msa", "describe_structure"}
     for key, value in config.items():
         if key not in SCRIPT_ONLY_KEYS:
             setattr(ttt_cfg, key, value)
