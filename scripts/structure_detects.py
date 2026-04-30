@@ -1,7 +1,65 @@
 import json
+from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 import numpy as np
+
+
+@dataclass
+class _ProteinBackbone:
+  atom_positions: np.ndarray  # [num_res, 3, 3] for N, CA, C
+  atom_mask: np.ndarray       # [num_res, 3]
+  chain_index: np.ndarray     # [num_res]
+  b_factors: np.ndarray       # [num_res, 3]
+
+
+def _parse_pdb_backbone(pdb_str: str) -> '_ProteinBackbone':
+  """Parses backbone atoms (N, CA, C) from a PDB string.
+
+  Avoids the alphafold dependency by reading ATOM records directly.
+  """
+  BACKBONE = {'N': 0, 'CA': 1, 'C': 2}
+  residues: Dict = {}  # (chain_id, res_num) -> {atom_name: ([x,y,z], b)}
+  chain_order: Dict[str, int] = {}
+
+  for line in pdb_str.splitlines():
+    if not line.startswith('ATOM'):
+      continue
+    alt_loc = line[16]
+    if alt_loc not in (' ', 'A'):
+      continue
+    atom_name = line[12:16].strip()
+    if atom_name not in BACKBONE:
+      continue
+    chain_id = line[21]
+    res_num = int(line[22:26])
+    x, y, z = float(line[30:38]), float(line[38:46]), float(line[46:54])
+    b = float(line[60:66])
+
+    if chain_id not in chain_order:
+      chain_order[chain_id] = len(chain_order)
+    key = (chain_id, res_num)
+    if key not in residues:
+      residues[key] = {}
+    residues[key][atom_name] = (np.array([x, y, z]), b)
+
+  sorted_keys = sorted(residues, key=lambda k: (chain_order[k[0]], k[1]))
+  num_res = len(sorted_keys)
+  atom_positions = np.zeros((num_res, 3, 3))
+  atom_mask = np.zeros((num_res, 3))
+  chain_index = np.zeros(num_res, dtype=int)
+  b_factors = np.zeros((num_res, 3))
+
+  for i, key in enumerate(sorted_keys):
+    chain_index[i] = chain_order[key[0]]
+    for name, idx in BACKBONE.items():
+      if name in residues[key]:
+        xyz, b = residues[key][name]
+        atom_positions[i, idx] = xyz
+        atom_mask[i, idx] = 1.0
+        b_factors[i, idx] = b
+
+  return _ProteinBackbone(atom_positions, atom_mask, chain_index, b_factors)
 
 
 def _dihedral_angle(
@@ -101,11 +159,9 @@ def is_dynamic_protein(pdb_path: str) -> bool:
   Returns:
     True if the protein is dynamic, False otherwise.
   """
-  from alphafold.common import protein  # Avoid circular import.
-
   with open(pdb_path, 'r') as f:
     pdb_str = f.read()
-  prot = protein.from_pdb_string(pdb_str)
+  prot = _parse_pdb_backbone(pdb_str)
 
   # pLDDT is stored as B-factor; use CA atom (index 1) per residue.
   plddt_per_residue = prot.b_factors[:, 1]
@@ -126,11 +182,9 @@ def is_one_helix_protein(pdb_path: str) -> bool:
     1. Mean pLDDT > 80
     2. More than 80% of residues are helices (not sheet or loop)
   """
-  from alphafold.common import protein  # Avoid circular import.
-
   with open(pdb_path, 'r') as f:
     pdb_str = f.read()
-  prot = protein.from_pdb_string(pdb_str)
+  prot = _parse_pdb_backbone(pdb_str)
 
   plddt_per_residue = prot.b_factors[:, 1]
   mean_plddt = np.mean(plddt_per_residue)
@@ -151,11 +205,9 @@ def describe_protein_structure(pdb_path: str) -> str:
   Returns:
     A string describing the protein structure.
   """
-  from alphafold.common import protein  # Avoid circular import.
-
   with open(pdb_path, 'r') as f:
     pdb_str = f.read()
-  prot = protein.from_pdb_string(pdb_str)
+  prot = _parse_pdb_backbone(pdb_str)
 
   phi, psi = _compute_phi_psi(prot.atom_positions, prot.atom_mask,
                                prot.chain_index)
