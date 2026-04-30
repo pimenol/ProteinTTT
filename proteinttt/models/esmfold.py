@@ -123,6 +123,8 @@ class ESMFoldTTT(TTTModule, ESMFold):
             lddt = lddt_score(correct_pdb_path, self._ttt_temp_pdb_path)
 
         eval_step_preds = {"pdb": pdb_str}
+        if getattr(self.ttt_cfg, "save_embeddings", False):
+            eval_step_preds["s_s"] = output["s_s"].squeeze(0).cpu().numpy()
         eval_step_metric_dict = {
             "plddt": plddt,
             "tm_score": tm_score,

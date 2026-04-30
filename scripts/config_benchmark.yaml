@@ -1,21 +1,22 @@
 # ProteinTTT Benchmark Configuration
-# Runs multiple seeds and computes per-step LDDT for aggregated plots.
 
 # Data settings
-df_path: "/home/pimenol1/ProteinTTT/data/WIV_david_data"
-max_sequence_length: 10000
+df_path: "/home/pimenol1/ProteinTTT/data/benchmark"
+max_sequence_length: 500
 use_true_pdb: true
 use_chain_name: false
 renumber_pdb: false
+save_pdb_log: true
+save_embeddings: true
+compute_step_metrics: true
+describe_structure: true
 
 # Test-Time Training settings
 msa: true
-generate_msa: true
-describe_structure: false
+generate_msa: false
 msa_sampling_strategy: "neighbors"
 gradient_clip: true
 gradient_clip_max_norm: 1.5
-compute_step_metrics: true 
 confidence_collapse_ratio: 0.7
 confidence_collapse_patience: 3
 steps: 20
@@ -31,8 +32,8 @@ num_seeds: 1
 
 input:
   summary_file: "summary.csv"
-  pdb_dir: ""
-  msa_dir: ""
+  pdb_dir: "/home/pimenol1/data/bfvd/benchmark/pdb_AF"
+  msa_dir: "/home/pimenol1/data/bfvd/benchmark/bfvd_msa"
 
 columns:
   id_column: "id"

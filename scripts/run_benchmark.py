@@ -129,8 +129,31 @@ def run_seed(model, config, seed, df, output_dir, pdb_dir, msa_dir):
             df_logs = ttt_result["df"].copy()
             df_logs.to_csv(logs_dir / f"{seq_id}_log.tsv", sep="\t", index=False)
 
-            # Save before-TTT (step-0) structure
+            # Save per-step PDBs and/or embeddings into logs_dir/<seq_id>/
             step_data = ttt_result["ttt_step_data"]
+            save_pdb_log = config.get("save_pdb_log", False)
+            save_embeddings = config.get("save_embeddings", False)
+            if save_pdb_log or save_embeddings:
+                protein_log_dir = logs_dir / seq_id
+                if save_pdb_log:
+                    pdbs_dir = protein_log_dir / "pdbs"
+                    pdbs_dir.mkdir(parents=True, exist_ok=True)
+                    df_logs.to_csv(protein_log_dir / f"{seq_id}_log.tsv", sep="\t", index=False)
+                if save_embeddings:
+                    emb_dir = protein_log_dir / "embeddings"
+                    emb_dir.mkdir(parents=True, exist_ok=True)
+                for step_idx, sd in step_data.items():
+                    ep = sd.get("eval_step_preds") or {}
+                    if save_pdb_log and ep.get("pdb") is not None:
+                        pdb_str_step = ep["pdb"]
+                        if isinstance(pdb_str_step, list):
+                            pdb_str_step = pdb_str_step[0]
+                        with open(pdbs_dir / f"step_{step_idx}.pdb", "w") as f:
+                            f.write(pdb_str_step)
+                    if save_embeddings and ep.get("s_s") is not None:
+                        np.save(emb_dir / f"step_{step_idx}.npy", ep["s_s"])
+
+            # Save before-TTT (step-0) structure
             pdb_before = step_data[0]["eval_step_preds"]["pdb"]
             pdb_str_before = pdb_before[0] if isinstance(pdb_before, list) else pdb_before
             with open(esm_dir / f"{seq_id}.pdb", "w") as f:
@@ -609,7 +632,7 @@ def main():
     base_model = esm.pretrained.esmfold_v0().eval().to(device)
 
     ttt_cfg = GRAD_CLIP_ESMFOLD_TTT_CFG if config.get("gradient_clip", False) else DEFAULT_ESMFOLD_TTT_CFG
-    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns", "generate_msa", "describe_structure"}
+    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns", "generate_msa", "describe_structure", "save_pdb_log"}
     for key, value in config.items():
         if key not in SCRIPT_ONLY_KEYS:
             setattr(ttt_cfg, key, value)

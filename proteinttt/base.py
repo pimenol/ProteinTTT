@@ -110,8 +110,10 @@ class TTTConfig:
     confidence_collapse_patience: int = 3  # Number of consecutive collapsed steps before early stopping
 
     lr_scheduler: str | None = None  # None, 'cosine', 'cosine_warmup'
-    lr_warmup_steps: int = 0  
+    lr_warmup_steps: int = 0
     lr_min: float = 0.0
+
+    save_embeddings: bool = False  # Store s_s embedding per eval step in ttt_step_data
 
     @classmethod
     def from_yaml(cls, yaml_path: T.Union[str, Path]) -> "TTTConfig":
