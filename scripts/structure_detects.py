@@ -1,7 +1,57 @@
 import json
+from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 import numpy as np
+import biotite.structure.io.pdb as pdb_io
+import biotite.structure as struc
+
+
+_BACKBONE = ("N", "CA", "C")
+
+
+@dataclass(frozen=True)
+class _Protein:
+  """Minimal protein representation matching the fields used below."""
+  atom_positions: np.ndarray  # [num_res, 3, 3] — N(0), CA(1), C(2)
+  atom_mask: np.ndarray        # [num_res, 3]
+  chain_index: np.ndarray      # [num_res]
+  b_factors: np.ndarray        # [num_res, 3]
+
+
+def _from_pdb(pdb_path: str) -> _Protein:
+  """Parse a PDB file into the minimal fields needed for SS analysis."""
+  atoms = pdb_io.PDBFile.read(pdb_path).get_structure(
+      model=1, extra_fields=["b_factor"])
+  atoms = atoms[struc.filter_amino_acids(atoms)]
+
+  # Group atoms by (chain_id, res_id), preserving first-seen order.
+  res_to_atoms: Dict[Tuple[str, int], list] = {}
+  for i in range(len(atoms)):
+    key = (str(atoms.chain_id[i]), int(atoms.res_id[i]))
+    res_to_atoms.setdefault(key, []).append(i)
+
+  num_res = len(res_to_atoms)
+  atom_positions = np.zeros((num_res, 3, 3))
+  atom_mask = np.zeros((num_res, 3))
+  chain_index = np.zeros(num_res, dtype=int)
+  b_factors = np.zeros((num_res, 3))
+
+  chain_to_idx: Dict[str, int] = {}
+  for ri, (key, atom_idxs) in enumerate(res_to_atoms.items()):
+    chain_id = key[0]
+    if chain_id not in chain_to_idx:
+      chain_to_idx[chain_id] = len(chain_to_idx)
+    chain_index[ri] = chain_to_idx[chain_id]
+    for ai in atom_idxs:
+      name = str(atoms.atom_name[ai])
+      if name in _BACKBONE:
+        bi = _BACKBONE.index(name)
+        atom_positions[ri, bi] = atoms.coord[ai]
+        atom_mask[ri, bi] = 1.0
+        b_factors[ri, bi] = float(atoms.b_factor[ai])
+
+  return _Protein(atom_positions, atom_mask, chain_index, b_factors)
 
 
 def _dihedral_angle(
@@ -101,11 +151,7 @@ def is_dynamic_protein(pdb_path: str) -> bool:
   Returns:
     True if the protein is dynamic, False otherwise.
   """
-  from alphafold.common import protein  # Avoid circular import.
-
-  with open(pdb_path, 'r') as f:
-    pdb_str = f.read()
-  prot = protein.from_pdb_string(pdb_str)
+  prot = _from_pdb(pdb_path)
 
   # pLDDT is stored as B-factor; use CA atom (index 1) per residue.
   plddt_per_residue = prot.b_factors[:, 1]
@@ -126,11 +172,7 @@ def is_one_helix_protein(pdb_path: str) -> bool:
     1. Mean pLDDT > 80
     2. More than 80% of residues are helices (not sheet or loop)
   """
-  from alphafold.common import protein  # Avoid circular import.
-
-  with open(pdb_path, 'r') as f:
-    pdb_str = f.read()
-  prot = protein.from_pdb_string(pdb_str)
+  prot = _from_pdb(pdb_path)
 
   plddt_per_residue = prot.b_factors[:, 1]
   mean_plddt = np.mean(plddt_per_residue)
@@ -151,11 +193,7 @@ def describe_protein_structure(pdb_path: str) -> str:
   Returns:
     A string describing the protein structure.
   """
-  from alphafold.common import protein  # Avoid circular import.
-
-  with open(pdb_path, 'r') as f:
-    pdb_str = f.read()
-  prot = protein.from_pdb_string(pdb_str)
+  prot = _from_pdb(pdb_path)
 
   phi, psi = _compute_phi_psi(prot.atom_positions, prot.atom_mask,
                                prot.chain_index)

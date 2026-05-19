@@ -1,19 +1,18 @@
-# ProteinTTT Benchmark Configuration
-# Runs multiple seeds and computes per-step LDDT for aggregated plots.
+# ProteinTTT Configuration
 
 # Data settings
 df_path: "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh/bfvd2"
 max_sequence_length: 500
-use_true_pdb: true
+use_true_pdb: false
 use_chain_name: false
 renumber_pdb: false
 
 # Test-Time Training settings
 msa: true
+generate_msa: false
 msa_sampling_strategy: "neighbors"
 gradient_clip: true
 gradient_clip_max_norm: 1.5
-
 compute_step_metrics: true 
 
 confidence_collapse_ratio: 0.7
@@ -29,9 +28,10 @@ mask_ratio: 0.2
 seed: 0  
 
 input:
-  summary_file: "summary_to_process.csv"
+  summary_file: "test.csv"
   pdb_dir: ""
   msa_dir: "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh/bfvd2/msa"
+  save_name: "bfvd_test"
 
 columns:
   id_column: "id"

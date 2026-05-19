@@ -129,8 +129,19 @@ def run_seed(model, config, seed, df, output_dir, pdb_dir, msa_dir):
             df_logs = ttt_result["df"].copy()
             df_logs.to_csv(logs_dir / f"{seq_id}_log.tsv", sep="\t", index=False)
 
-            # Save before-TTT (step-0) structure
+            # Save per-step PDB structures
             step_data = ttt_result["ttt_step_data"]
+            step_pdbs_dir = logs_dir / f"{seq_id}_pdbs"
+            step_pdbs_dir.mkdir(parents=True, exist_ok=True)
+            for step_idx, step_entry in step_data.items():
+                pdb_val = step_entry.get("eval_step_preds", {}).get("pdb")
+                if pdb_val is None:
+                    continue
+                pdb_str = pdb_val[0] if isinstance(pdb_val, list) else pdb_val
+                with open(step_pdbs_dir / f"step_{step_idx}.pdb", "w") as f:
+                    f.write(pdb_str)
+
+            # Save before-TTT (step-0) structure
             pdb_before = step_data[0]["eval_step_preds"]["pdb"]
             pdb_str_before = pdb_before[0] if isinstance(pdb_before, list) else pdb_before
             with open(esm_dir / f"{seq_id}.pdb", "w") as f:
