@@ -161,8 +161,15 @@ def run_seed(model, config, seed, df, output_dir, pdb_dir, msa_dir):
 
             if config.get("describe_structure", False):
                 try:
-                    description = describe_protein_structure(str(out_pdb))
-                    logging.info(f"[Seed {seed}] {seq_id} structure description: {description}")
+                    ss = describe_protein_structure(str(out_pdb))
+                    n = len(ss)
+                    helix_pct = 100 * np.sum(ss == 0) / n
+                    sheet_pct = 100 * np.sum(ss == 1) / n
+                    loop_pct  = 100 * np.sum(ss == 2) / n
+                    logging.info(
+                        f"[Seed {seed}] {seq_id} structure: "
+                        f"helix={helix_pct:.1f}% sheet={sheet_pct:.1f}% loop={loop_pct:.1f}%"
+                    )
                 except Exception as e:
                     logging.warning(f"[Seed {seed}] describe_protein_structure failed for {seq_id}: {e}")
 
@@ -620,7 +627,7 @@ def main():
     base_model = esm.pretrained.esmfold_v0().eval().to(device)
 
     ttt_cfg = GRAD_CLIP_ESMFOLD_TTT_CFG if config.get("gradient_clip", False) else DEFAULT_ESMFOLD_TTT_CFG
-    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns", "generate_msa", "describe_structure"}
+    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns", "generate_msa", "describe_structure", "save_pdb_log"}
     for key, value in config.items():
         if key not in SCRIPT_ONLY_KEYS:
             setattr(ttt_cfg, key, value)
