@@ -9,6 +9,7 @@ Usage:
 """
 
 import sys
+import os
 import re
 import shutil
 import argparse
@@ -29,8 +30,6 @@ from proteinttt.models.esmfold import (
     DEFAULT_ESMFOLD_TTT_CFG,
     GRAD_CLIP_ESMFOLD_TTT_CFG,
 )
-from proteinttt.utils.structure import lddt_score
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from generate_msa import generate_msa
 from structure_detects import describe_protein_structure
@@ -54,15 +53,27 @@ def set_dynamic_chunk_size(model, sequence_length: int) -> int:
         chunk_size = 8
     else:
         chunk_size = 4
-    model.set_chunk_size(chunk_size)
+    # model.set_chunk_size(chunk_size)
     return chunk_size
+
+
+def ss_percentages(pdb_path: str) -> tuple[float, float, float]:
+    """Return (helix%, sheet%, loop%) for the structure at pdb_path."""
+    ss = describe_protein_structure(pdb_path)
+    n = len(ss)
+    if n == 0:
+        return (0.0, 0.0, 0.0)
+    helix = float(np.sum(ss == 0)) / n * 100.0
+    sheet = float(np.sum(ss == 1)) / n * 100.0
+    loop = float(np.sum(ss == 2)) / n * 100.0
+    return (helix, sheet, loop)
 
 
 # ---------------------------------------------------------------------------
 # Dataset runner
 # ---------------------------------------------------------------------------
 
-def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir):
+def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffix):
     """Run ProteinTTT on all proteins for one seed. Returns per-protein results DataFrame."""
     logs_root = output_dir / "logs"
     esm_ttt_dir = output_dir / "predicted_structures" / "ESMFold_ProteinTTT"
@@ -83,6 +94,12 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir):
     for idx, row in df.iterrows():
         seq_id = str(row[id_col])
         seq = str(row[seq_col]).strip().upper()
+
+        # Skip if this protein has already been processed in a prior run
+        if (esm_ttt_dir / f"{seq_id}.pdb").exists():
+            logging.info(f"{seq_id}: output already exists, skipping")
+            continue
+
         true_path = pdb_dir / f"{seq_id}.pdb"
         has_reference = true_path.exists()
 
@@ -161,24 +178,33 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir):
                 except Exception as e:
                     logging.warning(f"describe_protein_structure failed for {seq_id}: {e}")
 
-            # Compute final LDDT against reference (only if available)
-            lddt_after = None
-            lddt_before = None
-            if has_reference:
-                lddt_after = lddt_score(str(true_path), str(out_pdb))
-                lddt_before = lddt_score(str(true_path), str(esm_dir / f"{seq_id}.pdb"))
+            # Secondary-structure percentages from phi/psi (helix/sheet/loop)
+            ss_cols = {}
+            if config.get("compute_ss_percentages", False):
+                try:
+                    helix_b, sheet_b, loop_b = ss_percentages(str(esm_dir / f"{seq_id}.pdb"))
+                except Exception as e:
+                    logging.warning(f"SS computation failed for {seq_id} (before): {e}")
+                    helix_b = sheet_b = loop_b = None
+                try:
+                    helix_a, sheet_a, loop_a = ss_percentages(str(out_pdb))
+                except Exception as e:
+                    logging.warning(f"SS computation failed for {seq_id} (after): {e}")
+                    helix_a = sheet_a = loop_a = None
+                ss_cols = {
+                    "helix_pct_ESMFold": helix_b,
+                    "sheet_pct_ESMFold": sheet_b,
+                    "loop_pct_ESMFold": loop_b,
+                    "helix_pct_ProteinTTT": helix_a,
+                    "sheet_pct_ProteinTTT": sheet_a,
+                    "loop_pct_ProteinTTT": loop_a,
+                }
 
             elapsed = time.time() - start_time
-            if has_reference:
-                logging.info(
-                    f"{seq_id}: pLDDT {plddt_before:.2f} -> {plddt_after:.2f}, "
-                    f"LDDT {lddt_before:.4f} -> {lddt_after:.4f}, time: {elapsed:.1f}s"
-                )
-            else:
-                logging.info(
-                    f"{seq_id}: pLDDT {plddt_before:.2f} -> {plddt_after:.2f}, "
-                    f"time: {elapsed:.1f}s"
-                )
+            logging.info(
+                f"{seq_id}: pLDDT {plddt_before:.2f} -> {plddt_after:.2f}, "
+                f"time: {elapsed:.1f}s"
+            )
 
             results.append(
                 {
@@ -186,8 +212,7 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir):
                     "seed": seed,
                     "pLDDT_ESMFold": plddt_before,
                     "pLDDT_ProteinTTT": plddt_after,
-                    "lddt_ESMFold": lddt_before,
-                    "lddt_ProteinTTT": lddt_after,
+                    **ss_cols,
                     "time_seconds": elapsed,
                 }
             )
@@ -198,17 +223,12 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir):
 
     # Save run summary
     results_df = pd.DataFrame(results)
-    results_df.to_csv(output_dir / "results.csv", index=False)
+    results_df.to_csv(output_dir / f"results_{job_suffix}.csv", index=False)
 
-    has_lddt = "lddt_ProteinTTT" in results_df.columns and results_df["lddt_ProteinTTT"].notna().any()
     avg_time = results_df["time_seconds"].mean() if len(results_df) else 0.0
-    metric_str = (
-        f"mean LDDT = {results_df['lddt_ProteinTTT'].mean():.4f}"
-        if has_lddt
-        else f"mean pLDDT = {results_df['pLDDT_ProteinTTT'].mean():.2f}"
-    )
+    mean_plddt = results_df["pLDDT_ProteinTTT"].mean() if len(results_df) else 0.0
     logging.info(
-        f"Done – {len(results_df)} proteins, {metric_str}, "
+        f"Done – {len(results_df)} proteins, mean pLDDT = {mean_plddt:.2f}, "
         f"avg time per protein = {avg_time:.1f}s"
     )
     return results_df
@@ -228,6 +248,8 @@ def main():
     parser.add_argument("--output_dir", type=str, default=None,
                         help="Explicit output directory. If omitted, uses <df_path>/<save_name>/ from config.")
     parser.add_argument("--name", type=str, default=None, help="Optional suffix appended to save_name (e.g. <save_name>_<name>/)")
+    parser.add_argument("--start", type=int, default=None, help="Start row index in the CSV (inclusive, 0-based). For sharding the dataset across jobs.")
+    parser.add_argument("--end", type=int, default=None, help="End row index in the CSV (exclusive). For sharding the dataset across jobs.")
     # Hyperparameter overrides (all optional; override the YAML config when provided)
     parser.add_argument("--lr", type=float, default=None, help="Learning rate (overrides config)")
     parser.add_argument("--steps", type=int, default=None, help="Number of TTT steps (overrides config)")
@@ -325,12 +347,14 @@ def main():
     msa_dir = Path(config["input"]["msa_dir"])
     summary_path = source_base_path / config["input"]["summary_file"]
 
+    job_suffix = os.getenv("SLURM_JOB_ID", time.strftime("%Y%m%d_%H%M%S"))
+
     # Logging
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
-            logging.FileHandler(output_dir / "dataset.log"),
+            logging.FileHandler(output_dir / f"dataset_{job_suffix}.log"),
             logging.StreamHandler(sys.stdout),
         ],
         force=True,
@@ -344,6 +368,12 @@ def main():
 
     # Load data
     df = pd.read_csv(summary_path)
+    total_rows = len(df)
+    if args.start is not None or args.end is not None:
+        start = args.start if args.start is not None else 0
+        end = args.end if args.end is not None else total_rows
+        df = df.iloc[start:end].copy()
+        logging.info(f"Sharding CSV rows [{start}, {end}) of {total_rows} -> {len(df)} proteins")
     df["sequence_length"] = df[config["columns"]["sequence_column"]].apply(len)
     max_len = config.get("max_sequence_length", 500)
     df = df.query(f"sequence_length <= {max_len}").copy()
@@ -356,7 +386,7 @@ def main():
     base_model = esm.pretrained.esmfold_v0().eval().to(device)
 
     ttt_cfg = GRAD_CLIP_ESMFOLD_TTT_CFG if config.get("gradient_clip", False) else DEFAULT_ESMFOLD_TTT_CFG
-    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns", "generate_msa", "describe_structure"}
+    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns", "generate_msa", "describe_structure", "compute_ss_percentages"}
     for key, value in config.items():
         if key not in SCRIPT_ONLY_KEYS:
             setattr(ttt_cfg, key, value)
@@ -372,7 +402,7 @@ def main():
 
     # Run dataset
     total_start = time.time()
-    run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir)
+    run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffix)
     total_time = time.time() - total_start
     logging.info(f"Total runtime: {total_time:.1f}s ({total_time / 3600:.1f}h)")
     logging.info("Dataset run complete!")
