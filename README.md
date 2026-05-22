@@ -5,6 +5,7 @@
 [![arXiv badge](https://img.shields.io/badge/arXiv-2411.02109-b31b1b.svg)](https://arxiv.org/abs/2411.02109)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Hugging Face Space](https://img.shields.io/badge/%F0%9F%A4%97%20Space-ProteinTTT-blue)](https://huggingface.co/spaces/pimenova/ProteinTTT)
+[![Google Colab](https://img.shields.io/badge/Google%20Colab-ProteinTTT-blue)](https://colab.research.google.com/drive/1l_h7cw82SQpW9PvYzSQeYS4TXzS1QJ8o)
 
 </div>
 
@@ -14,9 +15,9 @@
 
 ProteinTTT enables customizing protein language models to one protein at a time for enhanced performance on challenging targets.
 
-## Demo on Hugging Face Spaces 🤗
+## Demo on Hugging Face Spaces 🤗 and Google Colab
 
-To try ESMFold+ProteinTTT in your browser (no installation), see the [Hugging Face Space](https://huggingface.co/spaces/pimenova/ProteinTTT).
+To try ESMFold+ProteinTTT in your browser (no installation), see the [Hugging Face Space](https://huggingface.co/spaces/pimenova/ProteinTTT) and the [Google Colab notebook](https://colab.research.google.com/drive/1l_h7cw82SQpW9PvYzSQeYS4TXzS1QJ8o).
 
 ![Hugging Face Space](assets/hf_space.png)
 
@@ -119,12 +120,12 @@ The abstract class `proteinttt.base.TTTModule` implements all core functionality
 If you use ProteinTTT in your research, please cite the following paper:
 
 ```bibtex
-@article{bushuiev2025one,
+@article{bushuiev2026one,
   title={One protein is all you need},
   author={Bushuiev, Anton and Bushuiev, Roman and Pimenova, Olga and Zadorozhny, Nikola and Samusevich, Raman and Manaskova, Elisabet and Kim, Rachel Seongeun and St{\"a}rk, Hannes and Sedlar, Jiri and Steinegger, Martin and Tom{\'a}{\v{s}} and Sivic, Josef},
   journal={ICLR 2026 (The Fourteenth International Conference on Learning Representations)},
   url={https://arxiv.org/abs/2411.02109},
   doi={10.48550/arXiv.2411.02109},
-  year={2025}
+  year={2026}
 }
 ```
