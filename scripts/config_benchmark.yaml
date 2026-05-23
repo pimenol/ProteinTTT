@@ -8,7 +8,6 @@ use_chain_name: false
 renumber_pdb: false
 save_pdb_log: true
 save_embeddings: true
-compute_step_metrics: true
 describe_structure: true
 
 # Test-Time Training settings

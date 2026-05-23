@@ -265,6 +265,8 @@ def main():
     parser.add_argument("--no_msa", action="store_true", help="Disable MSA (overrides config)")
     parser.add_argument("--gradient_clip", action="store_true", default=None, help="Enable gradient clipping (overrides config)")
     parser.add_argument("--no_gradient_clip", action="store_true", help="Disable gradient clipping (overrides config)")
+    parser.add_argument("--compute_ss_percentages", action="store_true", default=None, help="Include helix/sheet/loop % columns in results.csv (overrides config)")
+    parser.add_argument("--no_compute_ss_percentages", action="store_true", help="Disable SS % columns (overrides config)")
     parser.add_argument("--max_sequence_length", type=int, default=None, help="Max sequence length (overrides config)")
     parser.add_argument("--optimizer", type=str, default=None, help="Optimizer: sgd or adamw (overrides config)")
     parser.add_argument("--momentum", type=float, default=None, help="SGD momentum (overrides config)")
@@ -318,6 +320,12 @@ def main():
     elif args.gradient_clip:
         config["gradient_clip"] = True
         print("[CLI override] gradient_clip = True")
+    if args.no_compute_ss_percentages:
+        config["compute_ss_percentages"] = False
+        print("[CLI override] compute_ss_percentages = False")
+    elif args.compute_ss_percentages:
+        config["compute_ss_percentages"] = True
+        print("[CLI override] compute_ss_percentages = True")
 
     # Force per-step metrics so logs are populated
     config["compute_step_metrics"] = True
