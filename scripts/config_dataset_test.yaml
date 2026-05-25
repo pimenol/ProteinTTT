@@ -16,7 +16,6 @@ gradient_clip_max_norm: 1.5
 compute_step_metrics: true
 compute_ss_percentages: false
 save_results_table: true
-logger_level: "WARNING"
 
 confidence_collapse_ratio: 0.7
 confidence_collapse_patience: 3
@@ -31,10 +30,10 @@ mask_ratio: 0.2
 seed: 0  
 
 input:
-  summary_file: "summary_to_process_no_duplicates.csv"
+  summary_file: "test.csv"
   pdb_dir: ""
   msa_dir: "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh/bfvd2/msa"
-  save_name: "bfvd2"
+  save_name: "bfvd_test"
 
 columns:
   id_column: "id"

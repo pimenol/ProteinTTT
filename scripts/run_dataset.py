@@ -81,16 +81,16 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffi
     for d in [logs_root, esm_ttt_dir, esm_dir]:
         d.mkdir(parents=True, exist_ok=True)
 
-    # Set seed everywhere
     model.ttt_cfg.seed = seed
-    model.ttt_generator.manual_seed(seed)
-    torch.manual_seed(seed)
-    np.random.seed(seed)
 
     id_col = config["columns"]["id_column"]
     seq_col = config["columns"]["sequence_column"]
+    save_results = config.get("save_results_table", True)
+    compute_ss = save_results and config.get("compute_ss_percentages", False)
 
     results = []
+    processed = 0
+    total_elapsed = 0.0
     for idx, row in df.iterrows():
         seq_id = str(row[id_col])
         seq = str(row[seq_col]).strip().upper()
@@ -108,6 +108,10 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffi
 
         logging.info(f"Processing {seq_id} (length: {len(seq)})")
         start_time = time.time()
+        # Reset RNG state per-protein so identical sequences yield identical TTT outputs
+        model.ttt_generator.manual_seed(seed)
+        torch.manual_seed(seed)
+        np.random.seed(seed)
         chunk_size = set_dynamic_chunk_size(model, len(seq))
         model.ttt_reset()
         model.set_chunk_size(chunk_size)
@@ -158,7 +162,6 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffi
             pdb_str_before = pdb_before[0] if isinstance(pdb_before, list) else pdb_before
             with open(esm_dir / f"{seq_id}.pdb", "w") as f:
                 f.write(pdb_str_before)
-            plddt_before = float(df_logs["plddt"].iloc[0])
 
             # Predict final structure (model is at best-state after ttt())
             with torch.no_grad():
@@ -168,8 +171,6 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffi
             out_pdb = esm_ttt_dir / f"{seq_id}.pdb"
             with open(out_pdb, "w") as f:
                 f.write(pdb_str_after)
-            struct = bsio.load_structure(str(out_pdb), extra_fields=["b_factor"])
-            plddt_after = float(np.asarray(struct.b_factor, dtype=float).mean())
 
             if config.get("describe_structure", False):
                 try:
@@ -178,60 +179,73 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffi
                 except Exception as e:
                     logging.warning(f"describe_protein_structure failed for {seq_id}: {e}")
 
-            # Secondary-structure percentages from phi/psi (helix/sheet/loop)
-            ss_cols = {}
-            if config.get("compute_ss_percentages", False):
-                try:
-                    helix_b, sheet_b, loop_b = ss_percentages(str(esm_dir / f"{seq_id}.pdb"))
-                except Exception as e:
-                    logging.warning(f"SS computation failed for {seq_id} (before): {e}")
-                    helix_b = sheet_b = loop_b = None
-                try:
-                    helix_a, sheet_a, loop_a = ss_percentages(str(out_pdb))
-                except Exception as e:
-                    logging.warning(f"SS computation failed for {seq_id} (after): {e}")
-                    helix_a = sheet_a = loop_a = None
-                ss_cols = {
-                    "helix_pct_ESMFold": helix_b,
-                    "sheet_pct_ESMFold": sheet_b,
-                    "loop_pct_ESMFold": loop_b,
-                    "helix_pct_ProteinTTT": helix_a,
-                    "sheet_pct_ProteinTTT": sheet_a,
-                    "loop_pct_ProteinTTT": loop_a,
-                }
-
             elapsed = time.time() - start_time
-            logging.info(
-                f"{seq_id}: pLDDT {plddt_before:.2f} -> {plddt_after:.2f}, "
-                f"time: {elapsed:.1f}s"
-            )
+            processed += 1
+            total_elapsed += elapsed
 
-            results.append(
-                {
-                    "id": seq_id,
-                    "seed": seed,
-                    "pLDDT_ESMFold": plddt_before,
-                    "pLDDT_ProteinTTT": plddt_after,
-                    **ss_cols,
-                    "time_seconds": elapsed,
-                }
-            )
+            if save_results:
+                # Table metrics — only computed when results.csv will be written
+                plddt_before = float(df_logs["plddt"].iloc[0])
+                struct = bsio.load_structure(str(out_pdb), extra_fields=["b_factor"])
+                plddt_after = float(np.asarray(struct.b_factor, dtype=float).mean())
+
+                ss_cols = {}
+                if compute_ss:
+                    try:
+                        helix_b, sheet_b, loop_b = ss_percentages(str(esm_dir / f"{seq_id}.pdb"))
+                    except Exception as e:
+                        logging.warning(f"SS computation failed for {seq_id} (before): {e}")
+                        helix_b = sheet_b = loop_b = None
+                    try:
+                        helix_a, sheet_a, loop_a = ss_percentages(str(out_pdb))
+                    except Exception as e:
+                        logging.warning(f"SS computation failed for {seq_id} (after): {e}")
+                        helix_a = sheet_a = loop_a = None
+                    ss_cols = {
+                        "helix_pct_ESMFold": helix_b,
+                        "sheet_pct_ESMFold": sheet_b,
+                        "loop_pct_ESMFold": loop_b,
+                        "helix_pct_ProteinTTT": helix_a,
+                        "sheet_pct_ProteinTTT": sheet_a,
+                        "loop_pct_ProteinTTT": loop_a,
+                    }
+
+                logging.info(
+                    f"{seq_id}: pLDDT {plddt_before:.2f} -> {plddt_after:.2f}, "
+                    f"time: {elapsed:.1f}s"
+                )
+                results.append(
+                    {
+                        "id": seq_id,
+                        "seed": seed,
+                        "pLDDT_ESMFold": plddt_before,
+                        "pLDDT_ProteinTTT": plddt_after,
+                        **ss_cols,
+                        "time_seconds": elapsed,
+                    }
+                )
+            else:
+                logging.info(f"{seq_id}: done, time: {elapsed:.1f}s")
         except Exception as e:
             logging.error(f"Error for {seq_id}: {e}")
             traceback.print_exc()
             continue
 
-    # Save run summary
-    results_df = pd.DataFrame(results)
-    results_df.to_csv(output_dir / f"results_{job_suffix}.csv", index=False)
-
-    avg_time = results_df["time_seconds"].mean() if len(results_df) else 0.0
-    mean_plddt = results_df["pLDDT_ProteinTTT"].mean() if len(results_df) else 0.0
+    avg_time = (total_elapsed / processed) if processed else 0.0
+    if save_results:
+        results_df = pd.DataFrame(results)
+        results_df.to_csv(output_dir / f"results_{job_suffix}.csv", index=False)
+        mean_plddt = results_df["pLDDT_ProteinTTT"].mean() if len(results_df) else 0.0
+        logging.info(
+            f"Done – {processed} proteins, mean pLDDT = {mean_plddt:.2f}, "
+            f"avg time per protein = {avg_time:.1f}s"
+        )
+        return results_df
     logging.info(
-        f"Done – {len(results_df)} proteins, mean pLDDT = {mean_plddt:.2f}, "
+        f"Done – {processed} proteins (results table disabled), "
         f"avg time per protein = {avg_time:.1f}s"
     )
-    return results_df
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +281,8 @@ def main():
     parser.add_argument("--no_gradient_clip", action="store_true", help="Disable gradient clipping (overrides config)")
     parser.add_argument("--compute_ss_percentages", action="store_true", default=None, help="Include helix/sheet/loop % columns in results.csv (overrides config)")
     parser.add_argument("--no_compute_ss_percentages", action="store_true", help="Disable SS % columns (overrides config)")
+    parser.add_argument("--save_results_table", action="store_true", default=None, help="Save per-protein results.csv (overrides config)")
+    parser.add_argument("--no_save_results_table", action="store_true", help="Skip writing results.csv; only keep logs & predictions (overrides config)")
     parser.add_argument("--max_sequence_length", type=int, default=None, help="Max sequence length (overrides config)")
     parser.add_argument("--optimizer", type=str, default=None, help="Optimizer: sgd or adamw (overrides config)")
     parser.add_argument("--momentum", type=float, default=None, help="SGD momentum (overrides config)")
@@ -326,6 +342,12 @@ def main():
     elif args.compute_ss_percentages:
         config["compute_ss_percentages"] = True
         print("[CLI override] compute_ss_percentages = True")
+    if args.no_save_results_table:
+        config["save_results_table"] = False
+        print("[CLI override] save_results_table = False")
+    elif args.save_results_table:
+        config["save_results_table"] = True
+        print("[CLI override] save_results_table = True")
 
     # Force per-step metrics so logs are populated
     config["compute_step_metrics"] = True
@@ -394,7 +416,7 @@ def main():
     base_model = esm.pretrained.esmfold_v0().eval().to(device)
 
     ttt_cfg = GRAD_CLIP_ESMFOLD_TTT_CFG if config.get("gradient_clip", False) else DEFAULT_ESMFOLD_TTT_CFG
-    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns", "generate_msa", "describe_structure", "compute_ss_percentages"}
+    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns", "generate_msa", "describe_structure", "compute_ss_percentages", "save_results_table"}
     for key, value in config.items():
         if key not in SCRIPT_ONLY_KEYS:
             setattr(ttt_cfg, key, value)

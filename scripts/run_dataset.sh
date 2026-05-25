@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=dataset
+#SBATCH --job-name=bfvdv2
 #SBATCH --account=OPEN-35-8
 #SBATCH --partition=qgpu
 #SBATCH --nodes=1
