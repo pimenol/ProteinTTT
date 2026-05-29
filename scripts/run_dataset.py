@@ -96,7 +96,7 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffi
         seq = str(row[seq_col]).strip().upper()
 
         # Skip if this protein has already been processed in a prior run
-        if (esm_ttt_dir / f"{seq_id}.pdb").exists():
+        if (esm_dir / f"{seq_id}.pdb").exists():
             logging.info(f"{seq_id}: output already exists, skipping")
             continue
 
