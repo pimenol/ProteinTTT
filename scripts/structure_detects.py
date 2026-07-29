@@ -200,3 +200,60 @@ def describe_protein_structure(pdb_path: str) -> str:
                                prot.chain_index)
   ss = _classify_secondary_structure(phi, psi)
   return ss
+
+
+def count_ss_segments(
+    ss: np.ndarray, label: int, min_len: int = 4, max_gap: int = 1
+) -> int:
+  """Counts secondary-structure segments of a given type.
+
+  Contiguous runs of residues with `ss == label` separated by gaps of at most
+  `max_gap` residues are merged into one segment; merged segments shorter than
+  `min_len` residues are discarded. Defaults (min_len=4, max_gap=1) roughly
+  match one turn of an alpha-helix and tolerate single-residue misclassifications.
+
+  Args:
+    ss: [num_res] integer SS array (0=helix, 1=sheet, 2=loop).
+    label: SS label to count (0, 1 or 2).
+    min_len: Minimum length (residues) of a counted segment.
+    max_gap: Maximum gap (residues) to bridge between runs of the same label.
+
+  Returns:
+    Number of segments of the given type.
+  """
+  mask = np.asarray(ss) == label
+  runs: list[list[int]] = []
+  start: Optional[int] = None
+  for i, v in enumerate(mask):
+    if v and start is None:
+      start = i
+    elif not v and start is not None:
+      runs.append([start, i])
+      start = None
+  if start is not None:
+    runs.append([start, len(mask)])
+  if not runs:
+    return 0
+
+  merged = [runs[0]]
+  for s, e in runs[1:]:
+    if s - merged[-1][1] <= max_gap:
+      merged[-1][1] = e
+    else:
+      merged.append([s, e])
+  return sum(1 for s, e in merged if (e - s) >= min_len)
+
+
+def count_helices(pdb_path: str, min_len: int = 4, max_gap: int = 1) -> int:
+  """Returns the number of alpha-helix segments in a PDB file."""
+  ss = describe_protein_structure(pdb_path)
+  return count_ss_segments(ss, 0, min_len=min_len, max_gap=max_gap)
+
+
+def load_ca_and_ss(pdb_path: str) -> Tuple[np.ndarray, np.ndarray]:
+  """Returns (CA coordinates [num_res, 3], SS labels [num_res]) for a PDB file."""
+  prot = _from_pdb(pdb_path)
+  phi, psi = _compute_phi_psi(prot.atom_positions, prot.atom_mask,
+                               prot.chain_index)
+  ss = _classify_secondary_structure(phi, psi)
+  return prot.atom_positions[:, 1], ss
