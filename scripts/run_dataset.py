@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 """
-Run ProteinTTT on a dataset (single seed, no plotting).
+Run ProteinTTT on a dataset (one or more seeds, no plotting).
 
 Usage:
     python scripts/run_dataset.py --config scripts/config_benchmark.yaml
     python scripts/run_dataset.py --config scripts/config_benchmark.yaml --output_dir /path/to/output
     python scripts/run_dataset.py --config scripts/config_benchmark.yaml --seed 7 --lr 0.04
+    python scripts/run_dataset.py --config scripts/config_benchmark.yaml --seed 1,2,3
+
+With several seeds each seed gets its own <output_dir>/seed_<N>/ subdirectory
+(logs, predicted structures, results_<job>.csv), plus a combined
+<output_dir>/results_<job>.csv across all seeds.
+
+With `rerun_helix: true` the structure ProteinTTT selected is tested for the
+one-helix (collapsed-rod) artifact; a protein that fails the test is run again
+with seed + `rerun_seed_offset` and only that second run is kept on disk.
 """
 
 import sys
@@ -33,6 +42,12 @@ from proteinttt.models.esmfold import (
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from generate_msa import generate_msa
 from structure_detects import describe_protein_structure
+from add_helix_filter import (
+    HELIX_DOMINANCE_MIN,
+    HELIX_PCT_MIN,
+    PLDDT_CONFIDENT,
+    ss_features,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +70,48 @@ def set_dynamic_chunk_size(model, sequence_length: int) -> int:
         chunk_size = 4
     # model.set_chunk_size(chunk_size)
     return chunk_size
+
+
+def parse_seeds(value) -> list[int]:
+    """Normalise a seed spec into a list of ints.
+
+    Accepts an int (``1``), a YAML list (``[1, 2, 3]``) or a comma/space
+    separated string (``"1, 2, 3"``).
+    """
+    if isinstance(value, (list, tuple)):
+        items = value
+    elif isinstance(value, str):
+        items = [tok for tok in re.split(r"[,\s]+", value.strip()) if tok]
+    else:
+        items = [value]
+    seeds = [int(item) for item in items]
+    if not seeds:
+        raise ValueError(f"No seeds parsed from {value!r}")
+    return seeds
+
+
+def mean_plddt(pdb_path: Path) -> float:
+    """Mean pLDDT, read from the B-factor column of a predicted structure."""
+    struct = bsio.load_structure(str(pdb_path), extra_fields=["b_factor"])
+    return float(np.asarray(struct.b_factor, dtype=float).mean())
+
+
+def one_helix_check(pdb_path: Path, plddt: float, helix_min: float,
+                    dominance_min: float, plddt_min: float) -> tuple[bool, dict[str, float]]:
+    """Is this structure a confident collapsed rod? Returns (flag, helix features).
+
+    Same two-part test as `one_helix_flag` in scripts/add_helix_filter.py:
+    most of the chain is helix AND most of that helix is a single segment.
+    """
+    feats = ss_features(pdb_path)
+    if not feats:
+        return False, {}
+    flag = (
+        feats["helix_pct"] >= helix_min
+        and feats["helix_dominance"] >= dominance_min
+        and plddt >= plddt_min
+    )
+    return flag, feats
 
 
 def ss_percentages(pdb_path: str) -> tuple[float, float, float]:
@@ -88,8 +145,24 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffi
     save_results = config.get("save_results_table", True)
     compute_ss = save_results and config.get("compute_ss_percentages", False)
 
+    # One-helix rerun: if the structure ProteinTTT selected is a confident
+    # collapsed rod, run the protein once more with a different seed and keep
+    # only that second run.
+    rerun_helix = config.get("rerun_helix", False)
+    rerun_seed_offset = int(config.get("rerun_seed_offset", 1000))
+    helix_min = float(config.get("helix_pct_min", HELIX_PCT_MIN))
+    dominance_min = float(config.get("helix_dominance_min", HELIX_DOMINANCE_MIN))
+    helix_plddt_min = float(config.get("helix_plddt_min", PLDDT_CONFIDENT))
+    if rerun_helix:
+        logging.info(
+            f"One-helix rerun enabled: helix_pct >= {helix_min:g}, "
+            f"helix_dominance >= {dominance_min:g}, pLDDT >= {helix_plddt_min:g}; "
+            f"rerun seed = seed + {rerun_seed_offset}"
+        )
+
     results = []
     processed = 0
+    n_rerun = 0
     total_elapsed = 0.0
     for idx, row in df.iterrows():
         seq_id = str(row[id_col])
@@ -108,13 +181,7 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffi
 
         logging.info(f"Processing {seq_id} (length: {len(seq)})")
         start_time = time.time()
-        # Reset RNG state per-protein so identical sequences yield identical TTT outputs
-        model.ttt_generator.manual_seed(seed)
-        torch.manual_seed(seed)
-        np.random.seed(seed)
         chunk_size = set_dynamic_chunk_size(model, len(seq))
-        model.ttt_reset()
-        model.set_chunk_size(chunk_size)
 
         try:
             # Determine MSA file (supports both flat <msa_dir>/<id>.a3m
@@ -135,42 +202,99 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffi
                         logging.warning(f"MSA not found ({msa_file}) and generate_msa=false, skipping {seq_id}")
                         continue
 
-            # Run TTT (pass correct_pdb_path only if reference exists)
-            ttt_result = model.ttt(
-                seq, msa_pth=msa_file,
-                correct_pdb_path=true_path if has_reference else None,
-            )
+            def ttt_pass(pass_seed: int) -> tuple[pd.DataFrame, str]:
+                """One complete TTT pass at pass_seed.
 
-            # Save per-step metrics (compact – no PDB strings)
-            protein_log_dir = logs_root / seq_id
-            protein_log_dir.mkdir(parents=True, exist_ok=True)
-            df_logs = ttt_result["df"].copy()
-            df_logs.to_csv(protein_log_dir / f"{seq_id}_log.tsv", sep="\t", index=False)
+                Writes the per-step logs/PDBs and the before-TTT baseline,
+                overwriting anything a previous pass left behind, and returns
+                (per-step log frame, final predicted PDB string).
+                """
+                # Reset RNG state per pass so identical sequences yield identical TTT outputs
+                model.ttt_generator.manual_seed(pass_seed)
+                torch.manual_seed(pass_seed)
+                np.random.seed(pass_seed)
+                model.ttt_cfg.seed = pass_seed
+                model.ttt_reset()
+                model.set_chunk_size(chunk_size)
 
-            # Save per-step PDB structures
-            step_data = ttt_result["ttt_step_data"]
-            for step_idx, step_entry in step_data.items():
-                pdb_val = step_entry.get("eval_step_preds", {}).get("pdb")
-                if pdb_val is None:
-                    continue
-                pdb_str = pdb_val[0] if isinstance(pdb_val, list) else pdb_val
-                with open(protein_log_dir / f"step_{step_idx}.pdb", "w") as f:
-                    f.write(pdb_str)
+                # Run TTT (pass correct_pdb_path only if reference exists)
+                ttt_result = model.ttt(
+                    seq, msa_pth=msa_file,
+                    correct_pdb_path=true_path if has_reference else None,
+                )
 
-            # Save before-TTT (step-0) structure
-            pdb_before = step_data[0]["eval_step_preds"]["pdb"]
-            pdb_str_before = pdb_before[0] if isinstance(pdb_before, list) else pdb_before
-            with open(esm_dir / f"{seq_id}.pdb", "w") as f:
-                f.write(pdb_str_before)
+                # Save per-step metrics (compact – no PDB strings)
+                protein_log_dir = logs_root / seq_id
+                protein_log_dir.mkdir(parents=True, exist_ok=True)
+                df_logs = ttt_result["df"].copy()
+                df_logs.to_csv(protein_log_dir / f"{seq_id}_log.tsv", sep="\t", index=False)
 
-            # Predict final structure (model is at best-state after ttt())
-            with torch.no_grad():
-                pdb_str_after = model.infer_pdb(seq)
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
+                # Save per-step PDB structures. Drop stale ones first: a rerun may
+                # early-stop at a different step, and only its own trace should remain.
+                for stale in protein_log_dir.glob("step_*.pdb"):
+                    stale.unlink()
+                step_data = ttt_result["ttt_step_data"]
+                for step_idx, step_entry in step_data.items():
+                    pdb_val = step_entry.get("eval_step_preds", {}).get("pdb")
+                    if pdb_val is None:
+                        continue
+                    pdb_str = pdb_val[0] if isinstance(pdb_val, list) else pdb_val
+                    with open(protein_log_dir / f"step_{step_idx}.pdb", "w") as f:
+                        f.write(pdb_str)
+
+                # Save before-TTT (step-0) structure
+                pdb_before = step_data[0]["eval_step_preds"]["pdb"]
+                pdb_str_before = pdb_before[0] if isinstance(pdb_before, list) else pdb_before
+                with open(esm_dir / f"{seq_id}.pdb", "w") as f:
+                    f.write(pdb_str_before)
+
+                # Predict final structure (model is at best-state after ttt())
+                with torch.no_grad():
+                    pdb_str_after = model.infer_pdb(seq)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                return df_logs, pdb_str_after
+
             out_pdb = esm_ttt_dir / f"{seq_id}.pdb"
+            df_logs, pdb_str_after = ttt_pass(seed)
             with open(out_pdb, "w") as f:
                 f.write(pdb_str_after)
+
+            plddt_before = float(df_logs["plddt"].iloc[0])
+            plddt_after = mean_plddt(out_pdb) if (save_results or rerun_helix) else None
+
+            # One-helix rerun. Only the structure ProteinTTT selected is tested,
+            # and a triggered rerun replaces the first run entirely.
+            rerun = False
+            rerun_seed = None
+            plddt_first = None
+            one_helix, helix_feats = False, {}
+            if rerun_helix:
+                one_helix, helix_feats = one_helix_check(
+                    out_pdb, plddt_after, helix_min, dominance_min, helix_plddt_min
+                )
+                if one_helix:
+                    rerun_seed = seed + rerun_seed_offset
+                    plddt_first = plddt_after
+                    logging.info(
+                        f"{seq_id}: one-helix rod (helix {helix_feats['helix_pct']:.1f}%, "
+                        f"dominance {helix_feats['helix_dominance']:.1f}%, "
+                        f"pLDDT {plddt_after:.2f}) -> rerun with seed {rerun_seed}"
+                    )
+                    df_logs, pdb_str_after = ttt_pass(rerun_seed)
+                    with open(out_pdb, "w") as f:
+                        f.write(pdb_str_after)
+                    plddt_before = float(df_logs["plddt"].iloc[0])
+                    plddt_after = mean_plddt(out_pdb)
+                    one_helix, helix_feats = one_helix_check(
+                        out_pdb, plddt_after, helix_min, dominance_min, helix_plddt_min
+                    )
+                    rerun = True
+                    n_rerun += 1
+                    logging.info(
+                        f"{seq_id}: rerun pLDDT {plddt_first:.2f} -> {plddt_after:.2f}, "
+                        f"still one-helix: {one_helix}"
+                    )
 
             if config.get("describe_structure", False):
                 try:
@@ -184,11 +308,6 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffi
             total_elapsed += elapsed
 
             if save_results:
-                # Table metrics — only computed when results.csv will be written
-                plddt_before = float(df_logs["plddt"].iloc[0])
-                struct = bsio.load_structure(str(out_pdb), extra_fields=["b_factor"])
-                plddt_after = float(np.asarray(struct.b_factor, dtype=float).mean())
-
                 ss_cols = {}
                 if compute_ss:
                     try:
@@ -210,6 +329,19 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffi
                         "loop_pct_ProteinTTT": loop_a,
                     }
 
+                # Rerun bookkeeping. Only emitted when the feature is on, so the
+                # table schema is unchanged for rerun_helix: false.
+                rerun_cols = {}
+                if rerun_helix:
+                    rerun_cols = {
+                        "helix_pct_ProteinTTT": helix_feats.get("helix_pct"),
+                        "helix_dominance_ProteinTTT": helix_feats.get("helix_dominance"),
+                        "one_helix_flag": one_helix,
+                        "rerun": rerun,
+                        "rerun_seed": rerun_seed,
+                        "pLDDT_ProteinTTT_first": plddt_first,
+                    }
+
                 logging.info(
                     f"{seq_id}: pLDDT {plddt_before:.2f} -> {plddt_after:.2f}, "
                     f"time: {elapsed:.1f}s"
@@ -221,6 +353,7 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffi
                         "pLDDT_ESMFold": plddt_before,
                         "pLDDT_ProteinTTT": plddt_after,
                         **ss_cols,
+                        **rerun_cols,
                         "time_seconds": elapsed,
                     }
                 )
@@ -232,12 +365,14 @@ def run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffi
             continue
 
     avg_time = (total_elapsed / processed) if processed else 0.0
+    if rerun_helix:
+        logging.info(f"One-helix reruns: {n_rerun} / {processed} proteins")
     if save_results:
         results_df = pd.DataFrame(results)
         results_df.to_csv(output_dir / f"results_{job_suffix}.csv", index=False)
-        mean_plddt = results_df["pLDDT_ProteinTTT"].mean() if len(results_df) else 0.0
+        mean_plddt_ttt = results_df["pLDDT_ProteinTTT"].mean() if len(results_df) else 0.0
         logging.info(
-            f"Done – {processed} proteins, mean pLDDT = {mean_plddt:.2f}, "
+            f"Done – {processed} proteins, mean pLDDT = {mean_plddt_ttt:.2f}, "
             f"avg time per protein = {avg_time:.1f}s"
         )
         return results_df
@@ -258,7 +393,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config file")
-    parser.add_argument("--seed", type=int, default=None, help="Seed (overrides config)")
+    parser.add_argument("--seed", type=str, default=None,
+                        help="Seed, or several comma-separated seeds e.g. '1,2,3' (overrides config)")
     parser.add_argument("--output_dir", type=str, default=None,
                         help="Explicit output directory. If omitted, uses <df_path>/<save_name>/ from config.")
     parser.add_argument("--name", type=str, default=None, help="Optional suffix appended to save_name (e.g. <save_name>_<name>/)")
@@ -281,6 +417,9 @@ def main():
     parser.add_argument("--no_gradient_clip", action="store_true", help="Disable gradient clipping (overrides config)")
     parser.add_argument("--compute_ss_percentages", action="store_true", default=None, help="Include helix/sheet/loop % columns in results.csv (overrides config)")
     parser.add_argument("--no_compute_ss_percentages", action="store_true", help="Disable SS % columns (overrides config)")
+    parser.add_argument("--rerun_helix", action="store_true", default=None, help="Rerun a protein with a different seed when ProteinTTT's chosen structure is a one-helix rod (overrides config)")
+    parser.add_argument("--no_rerun_helix", action="store_true", help="Disable the one-helix rerun (overrides config)")
+    parser.add_argument("--rerun_seed_offset", type=int, default=None, help="Rerun seed = seed + this offset (overrides config)")
     parser.add_argument("--save_results_table", action="store_true", default=None, help="Save per-protein results.csv (overrides config)")
     parser.add_argument("--no_save_results_table", action="store_true", help="Skip writing results.csv; only keep logs & predictions (overrides config)")
     parser.add_argument("--max_sequence_length", type=int, default=None, help="Max sequence length (overrides config)")
@@ -319,6 +458,7 @@ def main():
         "lr_scheduler": args.lr_scheduler,
         "lr_warmup_steps": args.lr_warmup_steps,
         "lr_min": args.lr_min,
+        "rerun_seed_offset": args.rerun_seed_offset,
     }
     for key, val in _hparam_overrides.items():
         if val is not None:
@@ -342,6 +482,12 @@ def main():
     elif args.compute_ss_percentages:
         config["compute_ss_percentages"] = True
         print("[CLI override] compute_ss_percentages = True")
+    if args.no_rerun_helix:
+        config["rerun_helix"] = False
+        print("[CLI override] rerun_helix = False")
+    elif args.rerun_helix:
+        config["rerun_helix"] = True
+        print("[CLI override] rerun_helix = True")
     if args.no_save_results_table:
         config["save_results_table"] = False
         print("[CLI override] save_results_table = False")
@@ -352,7 +498,7 @@ def main():
     # Force per-step metrics so logs are populated
     config["compute_step_metrics"] = True
 
-    seed = args.seed if args.seed is not None else config.get("seed", 0)
+    seeds = parse_seeds(args.seed if args.seed is not None else config.get("seed", 0))
 
     # Paths
     source_base_path = Path(config["df_path"]).expanduser().resolve()
@@ -393,7 +539,7 @@ def main():
     logging.getLogger("ttt_log").propagate = False
 
     logging.info(f"Config: {config_path}")
-    logging.info(f"Seed: {seed}")
+    logging.info(f"Seeds: {seeds}")
     logging.info(f"Output: {output_dir}")
 
     # Load data
@@ -416,7 +562,9 @@ def main():
     base_model = esm.pretrained.esmfold_v0().eval().to(device)
 
     ttt_cfg = GRAD_CLIP_ESMFOLD_TTT_CFG if config.get("gradient_clip", False) else DEFAULT_ESMFOLD_TTT_CFG
-    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns", "generate_msa", "describe_structure", "compute_ss_percentages", "save_results_table"}
+    # "seed" is excluded: run_dataset() sets ttt_cfg.seed per seed itself, and the
+    # config value may be a list.
+    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns", "generate_msa", "describe_structure", "compute_ss_percentages", "save_results_table", "seed", "rerun_helix", "rerun_seed_offset", "helix_pct_min", "helix_dominance_min", "helix_plddt_min"}
     for key, value in config.items():
         if key not in SCRIPT_ONLY_KEYS:
             setattr(ttt_cfg, key, value)
@@ -430,9 +578,29 @@ def main():
         base_model, ttt_cfg=ttt_cfg, esmfold_config=base_model.cfg
     ).to(device)
 
-    # Run dataset
+    # Run dataset once per seed. With several seeds each gets its own
+    # subdirectory so outputs (and the already-processed skip check) don't collide.
     total_start = time.time()
-    run_dataset(model, config, seed, df, output_dir, pdb_dir, msa_dir, job_suffix)
+    per_seed_results = []
+    for seed in seeds:
+        seed_output_dir = output_dir / f"seed_{seed}" if len(seeds) > 1 else output_dir
+        seed_output_dir.mkdir(parents=True, exist_ok=True)
+        logging.info(f"=== Seed {seed} -> {seed_output_dir} ===")
+        seed_start = time.time()
+        results_df = run_dataset(
+            model, config, seed, df, seed_output_dir, pdb_dir, msa_dir, job_suffix
+        )
+        logging.info(f"Seed {seed} finished in {time.time() - seed_start:.1f}s")
+        if results_df is not None and len(results_df):
+            per_seed_results.append(results_df)
+
+    # Combined table across all seeds
+    if len(seeds) > 1 and per_seed_results:
+        combined = pd.concat(per_seed_results, ignore_index=True)
+        combined_path = output_dir / f"results_{job_suffix}.csv"
+        combined.to_csv(combined_path, index=False)
+        logging.info(f"Combined results across {len(seeds)} seeds -> {combined_path}")
+
     total_time = time.time() - total_start
     logging.info(f"Total runtime: {total_time:.1f}s ({total_time / 3600:.1f}h)")
     logging.info("Dataset run complete!")

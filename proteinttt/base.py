@@ -10,6 +10,7 @@ import warnings
 
 import pandas as pd
 import torch
+import numpy as np
 
 try:
     from lora_diffusion.lora import inject_trainable_lora
@@ -344,10 +345,22 @@ class TTTModule(torch.nn.Module, ABC):
                 msa.append(self._ttt_tokenize(seq_msa, **kwargs).squeeze(0))
             msa = torch.stack(msa)  # [msa_len, seq_len]
 
-            # Check the MSA contains the target sequence as the first sequence
-            assert torch.all(
-                x[0, :] == msa[0, :]
-            ), "First sequence in MSA must be the same as the input sequence"
+            # Check the MSA query matches the input sequence. Lengths must
+            # match (a mismatch means the wrong/misaligned MSA was loaded);
+            # residue-level differences are tolerated -- e.g. ambiguous codes
+            # (B, Z, X, ...) that the MSA pipeline resolved to a standard
+            # residue -- and we defer to the MSA query as the reference.
+            assert x.shape[1] == msa.shape[1], (
+                f"MSA length ({msa.shape[1]}) does not match input sequence "
+                f"length ({x.shape[1]})"
+            )
+            if not torch.all(x[0, :] == msa[0, :]):
+                n_diff = int((x[0, :] != msa[0, :]).sum().item())
+                self.ttt_logger.warning(
+                    f"Input sequence differs from MSA query at {n_diff} "
+                    f"position(s) (e.g. ambiguous residue codes); using the "
+                    f"MSA query as the reference."
+                )
 
             # Set x to MSA to sample sequences from
             # - except for MSA soft labels where MSA is only used for loss calculation
@@ -607,7 +620,6 @@ class TTTModule(torch.nn.Module, ABC):
                             trainable_params, 
                             max_norm=self.ttt_cfg.gradient_clip_max_norm
                         )
-                        # self.ttt_logger.info(f"Total gradient norm: {total_norm}")                    
                     optimizer.step()
                     if scheduler is not None:
                         scheduler.step()
@@ -897,8 +909,7 @@ class TTTModule(torch.nn.Module, ABC):
         Returns:
             Tensor of selected MSA indices [batch_size].
         """
-        import numpy as np
-
+        
         unique_labels = sorted(set(cluster_labels) - {-1})
         if len(unique_labels) == 0:
             # No clusters found — fall back to random
