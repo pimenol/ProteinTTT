@@ -1,22 +1,21 @@
 # ProteinTTT Configuration
 
 # Data settings
-df_path: "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh/bfvd2"
-max_sequence_length: 500
+df_path: "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh/bfvd2/helix_analysis/"
+max_sequence_length: 450
 use_true_pdb: false
 use_chain_name: false
 renumber_pdb: false
 
 # Test-Time Training settings
 msa: true
-generate_msa: false
+generate_msa: false # if no msa is provided, generate one using ESM-MSA-1b
 msa_sampling_strategy: "neighbors"
 gradient_clip: true
 gradient_clip_max_norm: 1.5
 compute_step_metrics: true
 compute_ss_percentages: false
-save_results_table: true
-logger_level: "WARNING"
+save_results_table: false
 
 confidence_collapse_ratio: 0.7
 confidence_collapse_patience: 3
@@ -28,13 +27,19 @@ lora_alpha: 128
 ags: 64
 mask_ratio: 0.2
 
-seed: 0  
+seed: 0
+
+rerun_helix: false
+rerun_seed_offset: 1000
+helix_pct_min: 60.0        # % of the chain that must be helix
+helix_dominance_min: 70.0  # % of helical residues in the single longest segment
+helix_plddt_min: 70.0      # pLDDT above which a rod counts as "confident"
 
 input:
-  summary_file: "summary_to_process_no_duplicates.csv"
+  summary_file: "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh/bfvd2/to_process_summary.csv"
   pdb_dir: ""
   msa_dir: "/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh/bfvd2/msa"
-  save_name: "bfvd2"
+  save_name: "bfvd2_new"
 
 columns:
   id_column: "id"

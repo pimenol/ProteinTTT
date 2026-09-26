@@ -202,10 +202,10 @@ def describe_protein_structure(pdb_path: str) -> str:
   return ss
 
 
-def count_ss_segments(
+def ss_segment_lengths(
     ss: np.ndarray, label: int, min_len: int = 4, max_gap: int = 1
-) -> int:
-  """Counts secondary-structure segments of a given type.
+) -> list[int]:
+  """Returns the lengths (residues) of each secondary-structure segment.
 
   Contiguous runs of residues with `ss == label` separated by gaps of at most
   `max_gap` residues are merged into one segment; merged segments shorter than
@@ -214,12 +214,12 @@ def count_ss_segments(
 
   Args:
     ss: [num_res] integer SS array (0=helix, 1=sheet, 2=loop).
-    label: SS label to count (0, 1 or 2).
-    min_len: Minimum length (residues) of a counted segment.
+    label: SS label to measure (0, 1 or 2).
+    min_len: Minimum length (residues) of a reported segment.
     max_gap: Maximum gap (residues) to bridge between runs of the same label.
 
   Returns:
-    Number of segments of the given type.
+    Segment lengths in sequence order.
   """
   mask = np.asarray(ss) == label
   runs: list[list[int]] = []
@@ -233,7 +233,7 @@ def count_ss_segments(
   if start is not None:
     runs.append([start, len(mask)])
   if not runs:
-    return 0
+    return []
 
   merged = [runs[0]]
   for s, e in runs[1:]:
@@ -241,7 +241,26 @@ def count_ss_segments(
       merged[-1][1] = e
     else:
       merged.append([s, e])
-  return sum(1 for s, e in merged if (e - s) >= min_len)
+  return [e - s for s, e in merged if (e - s) >= min_len]
+
+
+def count_ss_segments(
+    ss: np.ndarray, label: int, min_len: int = 4, max_gap: int = 1
+) -> int:
+  """Counts secondary-structure segments of a given type.
+
+  See `ss_segment_lengths` for how segments are merged and filtered.
+
+  Args:
+    ss: [num_res] integer SS array (0=helix, 1=sheet, 2=loop).
+    label: SS label to count (0, 1 or 2).
+    min_len: Minimum length (residues) of a counted segment.
+    max_gap: Maximum gap (residues) to bridge between runs of the same label.
+
+  Returns:
+    Number of segments of the given type.
+  """
+  return len(ss_segment_lengths(ss, label, min_len=min_len, max_gap=max_gap))
 
 
 def count_helices(pdb_path: str, min_len: int = 4, max_gap: int = 1) -> int:
