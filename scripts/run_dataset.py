@@ -31,14 +31,8 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import torch
-import esm
 import biotite.structure.io as bsio
 
-from proteinttt.models.esmfold import (
-    ESMFoldTTT,
-    DEFAULT_ESMFOLD_TTT_CFG,
-    GRAD_CLIP_ESMFOLD_TTT_CFG,
-)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from generate_msa import generate_msa
 from structure_detects import describe_protein_structure
@@ -559,24 +553,33 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Device: {device}")
 
-    base_model = esm.pretrained.esmfold_v0().eval().to(device)
-
-    ttt_cfg = GRAD_CLIP_ESMFOLD_TTT_CFG if config.get("gradient_clip", False) else DEFAULT_ESMFOLD_TTT_CFG
+    if config.get("model", "esmfold") == "esmfold2":
+        from proteinttt.models.esmfold2 import ESMFold2TTT, load_esmfold2, DEFAULT_ESMFOLD2_TTT_CFG
+        ttt_cfg = DEFAULT_ESMFOLD2_TTT_CFG
+    else:
+        import esm
+        from proteinttt.models.esmfold import ESMFoldTTT, DEFAULT_ESMFOLD_TTT_CFG, GRAD_CLIP_ESMFOLD_TTT_CFG
+        base_model = esm.pretrained.esmfold_v0().eval().to(device)
+        ttt_cfg = GRAD_CLIP_ESMFOLD_TTT_CFG if config.get("gradient_clip", False) else DEFAULT_ESMFOLD_TTT_CFG
     # "seed" is excluded: run_dataset() sets ttt_cfg.seed per seed itself, and the
     # config value may be a list.
-    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns", "generate_msa", "describe_structure", "compute_ss_percentages", "save_results_table", "seed", "rerun_helix", "rerun_seed_offset", "helix_pct_min", "helix_dominance_min", "helix_plddt_min"}
+    SCRIPT_ONLY_KEYS = {"df_path", "output", "input", "compute_step_metrics", "new_experement_dir", "columns", "generate_msa", "describe_structure", "compute_ss_percentages", "save_results_table", "seed", "rerun_helix", "rerun_seed_offset", "helix_pct_min", "helix_dominance_min", "helix_plddt_min", "model", "esmfold2_models"}
     for key, value in config.items():
         if key not in SCRIPT_ONLY_KEYS:
             setattr(ttt_cfg, key, value)
 
-    if config.get("msa", False):
-        base_model.set_chunk_size(128)
-
     logging.info(f"TTT config: {ttt_cfg}")
 
-    model = ESMFoldTTT.ttt_from_pretrained(
-        base_model, ttt_cfg=ttt_cfg, esmfold_config=base_model.cfg
-    ).to(device)
+    if config.get("model", "esmfold") == "esmfold2":
+        model = ESMFold2TTT(
+            ttt_cfg, *(m.to(device) for m in load_esmfold2(**config.get("esmfold2_models", {})))
+        )
+    else:
+        if config.get("msa", False):
+            base_model.set_chunk_size(128)
+        model = ESMFoldTTT.ttt_from_pretrained(
+            base_model, ttt_cfg=ttt_cfg, esmfold_config=base_model.cfg
+        ).to(device)
 
     # Run dataset once per seed. With several seeds each gets its own
     # subdirectory so outputs (and the already-processed skip check) don't collide.

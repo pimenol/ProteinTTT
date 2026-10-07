@@ -20,7 +20,8 @@ conda activate proteinttt
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 
 cd /scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh || exit 1
-export PYTHONPATH="/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh"
+# results/ holds add_helix_filter.py, imported by run_dataset.py
+export PYTHONPATH="/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh:/scratch/project/open-35-8/pimenol1/ProteinTTT/ProteinTTT_fresh/results"
 
 # Use the env's python explicitly to avoid PATH ambiguity
 PY=/scratch/project/open-35-8/pimenol1/miniconda3/envs/proteinttt/bin/python3
