@@ -175,6 +175,12 @@ class ESMFold2TTT(TTTModule, torch.nn.Module):
         msa_pth: Path,
         **kwargs,
     ) -> T.Tuple[dict, dict, T.Optional[float]]:
+        # Optional `keep_step_states: true`: keep every step's LoRA weights (on
+        # the CPU) for weight averaging / interpolation after TTT
+        if getattr(self.ttt_cfg, "keep_step_states", False):
+            if step == 0:
+                self.step_states = []
+            self.step_states.append({n: v.cpu() for n, v in self._ttt_get_state().items()})
         with torch.no_grad():
             result = self.infer(seq)
         pdb_str = result.complex.to_protein_complex().to_pdb_string()
