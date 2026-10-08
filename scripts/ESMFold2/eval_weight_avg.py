@@ -51,7 +51,7 @@ def main() -> None:
         ))
     out = pd.DataFrame(rows).sort_values("lddt", ascending=False)
     out.to_csv(root / "summary.csv", index=False)
-    print(out.to_markdown(index=False, floatfmt=".3f"))
+    print(out.to_string(index=False, float_format="%.3f"))
 
 
 if __name__ == "__main__":
