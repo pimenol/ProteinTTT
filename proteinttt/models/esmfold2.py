@@ -16,6 +16,7 @@ from esm.models.esmfold2 import (
     ProteinInput,
     StructurePredictionInput,
 )
+from esm.utils.msa import MSA
 
 from proteinttt.base import TTTModule, TTTConfig
 
@@ -154,8 +155,16 @@ class ESMFold2TTT(TTTModule, torch.nn.Module):
     def set_chunk_size(self, chunk_size: int) -> None:
         pass
 
+    def ttt(self, seq: str, msa_pth: Path = None, **kwargs):
+        # Optional `esmfold2_msa_input: true` in the YAML: every fold also gets
+        # this MSA as model input (default: the MSA is only MLM training data)
+        self._msa_pth = msa_pth if getattr(self.ttt_cfg, "esmfold2_msa_input", False) else None
+        return super().ttt(seq, msa_pth=msa_pth, **kwargs)
+
     def infer(self, seq: str):
-        spi = StructurePredictionInput(sequences=[ProteinInput(id="A", sequence=seq)])
+        msa_pth = getattr(self, "_msa_pth", None)
+        msa = MSA.from_a3m(msa_pth) if msa_pth else None
+        spi = StructurePredictionInput(sequences=[ProteinInput(id="A", sequence=seq, msa=msa)])
         # Optional fold overrides, e.g. `esmfold2_fold: {num_loops: 3}` in the YAML
         fold_kwargs = getattr(self.ttt_cfg, "esmfold2_fold", None) or {}
         return ESMFold2InputBuilder().fold(
