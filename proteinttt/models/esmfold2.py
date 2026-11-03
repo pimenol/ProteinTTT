@@ -16,6 +16,7 @@ from esm.models.esmfold2 import (
     ProteinInput,
     StructurePredictionInput,
 )
+from esm.utils.structure.input_builder import DNAInput, LigandInput, RNAInput
 from esm.utils.msa import MSA
 
 from proteinttt.base import TTTModule, TTTConfig
@@ -161,10 +162,40 @@ class ESMFold2TTT(TTTModule, torch.nn.Module):
         self._msa_pth = msa_pth if getattr(self.ttt_cfg, "esmfold2_msa_input", False) else None
         return super().ttt(seq, msa_pth=msa_pth, **kwargs)
 
+    def set_complex(self, entry: T.Optional[dict], msa_root: T.Optional[Path] = None) -> None:
+        """Fold a whole complex instead of one chain (FoldBench).
+
+        `entry` = {"ttt_chain": id, "chains": [{"id", "type": protein|dna|rna|ligand,
+        "sequence" | "ccd", "msa" (protein only, relative to msa_root)}]}. TTT still trains
+        the LM on the `ttt_chain` sequence + MSA; every fold gets all chains, and every protein
+        chain gets its own MSA when `esmfold2_msa_input` is on. None = single-chain mode.
+        """
+        self._complex = entry
+        self._complex_msa_root = Path(msa_root) if msa_root else None
+
+    def _complex_input(self, seq: str) -> StructurePredictionInput:
+        use_msa = getattr(self.ttt_cfg, "esmfold2_msa_input", False)
+        items = []
+        for c in self._complex["chains"]:
+            if c["type"] == "protein":
+                s = seq if c["id"] == self._complex["ttt_chain"] else c["sequence"]
+                msa = MSA.from_a3m(self._complex_msa_root / c["msa"]) if use_msa else None
+                items.append(ProteinInput(id=c["id"], sequence=s, msa=msa))
+            elif c["type"] == "dna":
+                items.append(DNAInput(id=c["id"], sequence=c["sequence"]))
+            elif c["type"] == "rna":
+                items.append(RNAInput(id=c["id"], sequence=c["sequence"]))
+            else:
+                items.append(LigandInput(id=c["id"], ccd=list(c["ccd"])))
+        return StructurePredictionInput(sequences=items)
+
     def infer(self, seq: str):
-        msa_pth = getattr(self, "_msa_pth", None)
-        msa = MSA.from_a3m(msa_pth) if msa_pth else None
-        spi = StructurePredictionInput(sequences=[ProteinInput(id="A", sequence=seq, msa=msa)])
+        if getattr(self, "_complex", None) is not None:
+            spi = self._complex_input(seq)
+        else:
+            msa_pth = getattr(self, "_msa_pth", None)
+            msa = MSA.from_a3m(msa_pth) if msa_pth else None
+            spi = StructurePredictionInput(sequences=[ProteinInput(id="A", sequence=seq, msa=msa)])
         # Optional fold overrides, e.g. `esmfold2_fold: {num_loops: 3}` in the YAML
         fold_kwargs = getattr(self.ttt_cfg, "esmfold2_fold", None) or {}
         return ESMFold2InputBuilder().fold(
@@ -186,8 +217,12 @@ class ESMFold2TTT(TTTModule, torch.nn.Module):
     ) -> T.Tuple[dict, dict, T.Optional[float]]:
         with torch.no_grad():
             result = self.infer(seq)
-        pdb_str = result.complex.to_protein_complex().to_pdb_string()
         plddt = 100 * float(result.plddt.mean())
+        if getattr(self, "_complex", None) is not None:
+            # The PDB path keeps only protein chains; mmCIF keeps DNA/RNA/ligands
+            iptm = float(result.iptm) if result.iptm is not None else float("nan")
+            return {"cif": result.complex.to_mmcif()}, {"plddt": plddt, "ptm": float(result.ptm), "iptm": iptm}, plddt
+        pdb_str = result.complex.to_protein_complex().to_pdb_string()
         return {"pdb": pdb_str}, {"plddt": plddt, "ptm": float(result.ptm)}, plddt
 
 

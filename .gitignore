@@ -140,3 +140,6 @@ data/*
 jobs/*
 bfvd2/*
 results/*
+cameo/*
+/scripts/ESMFold2/*
+foldbench/*
