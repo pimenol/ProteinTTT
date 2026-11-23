@@ -172,6 +172,7 @@ class ESMFold2TTT(TTTModule, torch.nn.Module):
         """
         self._complex = entry
         self._complex_msa_root = Path(msa_root) if msa_root else None
+        self._complex_msas = {}  # a3m path -> parsed MSA, parsed once per entry
 
     def _complex_input(self, seq: str) -> StructurePredictionInput:
         use_msa = getattr(self.ttt_cfg, "esmfold2_msa_input", False)
@@ -179,7 +180,11 @@ class ESMFold2TTT(TTTModule, torch.nn.Module):
         for c in self._complex["chains"]:
             if c["type"] == "protein":
                 s = seq if c["id"] == self._complex["ttt_chain"] else c["sequence"]
-                msa = MSA.from_a3m(self._complex_msa_root / c["msa"]) if use_msa else None
+                msa = None
+                if use_msa:
+                    if c["msa"] not in self._complex_msas:
+                        self._complex_msas[c["msa"]] = MSA.from_a3m(self._complex_msa_root / c["msa"])
+                    msa = self._complex_msas[c["msa"]]
                 items.append(ProteinInput(id=c["id"], sequence=s, msa=msa))
             elif c["type"] == "dna":
                 items.append(DNAInput(id=c["id"], sequence=c["sequence"]))
